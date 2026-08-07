@@ -1,0 +1,37 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Dataset
+data/raw/
+data/dataset/
+# Generated metadata
+data/processed/
+data/split/
+
+# Processed/generated data
+data/processed/clips/
+
+# Checkpoints and model weights
+checkpoints/
+weights/
+*.pt
+*.pth
+*.ckpt
+
+# Training outputs
+runs/
+logs/
+wandb/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
