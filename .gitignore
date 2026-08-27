@@ -8,7 +8,7 @@ data/raw/
 data/dataset/
 # Generated metadata
 data/processed/
-data/split/
+
 
 # Processed/generated data
 data/processed/clips/
