@@ -1,22 +1,23 @@
 """
 =========================================================
-Appearance Trainer
+Appearance Branch - 150 Source Group Test Training
+=========================================================
 
-Trains the Appearance Branch using:
+Small end-to-end training experiment.
 
-AppearanceClassifier
-        ↓
-Evidence
-        ↓
-EDL Loss
+Dataset split:
+    100 source groups -> TRAIN
+     25 source groups -> VALIDATION
+     25 source groups -> TEST
 
-Supports
+IMPORTANT:
+- Test CSV is NOT used during training.
+- Validation is used only during training for model selection.
+- Final evaluation must use test.csv with the saved best.pt.
+- Existing full/small checkpoints are NOT overwritten.
 
-- Mixed Precision (AMP)
-- Gradient Accumulation
-- Checkpoint Saving
-- Validation
-- Resume Training
+Checkpoint directory:
+    checkpoints/appearance_test_150/
 
 Designed for a single 8GB GPU.
 =========================================================
@@ -25,35 +26,40 @@ Designed for a single 8GB GPU.
 import os
 import time
 import subprocess
+import sys
+from pathlib import Path
+
+# =========================================================
+# PROJECT ROOT
+# =========================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 import torch
 from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
+
 from data.dataset.appearance.deepfake_dataset import DeepfakeDataset
-
 from models.appearence.appearance_classifier import AppearanceClassifier
-
 from models.heads.evidence_head import compute_dirichlet
-
 from losses.edl_loss import compute_edl_loss
 
 
-class AppearanceTrainer:
-
-    """
-    Trainer for the Appearance Branch.
-    """
+class AppearanceTestTrainer:
 
     def __init__(
         self,
-        train_csv,
-        val_csv,
-        dataset_root,
-        checkpoint_dir="checkpoints/appearance",
-        batch_size=2,
-        accumulation_steps=8,
+        train_csv="data/split/test_150/train.csv",
+        val_csv="data/split/test_150/val.csv",
+        dataset_root="data/raw",
+        checkpoint_dir="checkpoints/appearance_test_150",
+        batch_size=4,
+        accumulation_steps=4,
         lr=1e-4,
         weight_decay=1e-4,
-        num_epochs=1, #30
+        num_epochs=3,
         num_classes=2,
         annealing_step=10,
         freeze_backbone=True,
@@ -61,18 +67,10 @@ class AppearanceTrainer:
         device=None,
     ):
 
-        # -------------------------------------------------
-        # Device
-        # -------------------------------------------------
-
         self.device = device or (
             "cuda" if torch.cuda.is_available()
             else "cpu"
         )
-
-        # -------------------------------------------------
-        # Hyperparameters
-        # -------------------------------------------------
 
         self.batch_size = batch_size
         self.accumulation_steps = accumulation_steps
@@ -80,47 +78,50 @@ class AppearanceTrainer:
         self.num_classes = num_classes
         self.annealing_step = annealing_step
 
-        self.best_val_acc = 0.0
+        self.best_val_acc = -1.0
 
-        # -------------------------------------------------
-        # Checkpoints
-        # -------------------------------------------------
-
-        self.checkpoint_dir = checkpoint_dir
         os.makedirs(
-            self.checkpoint_dir,
+            checkpoint_dir,
             exist_ok=True,
         )
 
-        print("=" * 60)
-        print("Appearance Trainer")
-        print("=" * 60)
-        print(f"Device               : {self.device}")
-        print(f"Batch Size           : {batch_size}")
-        print(f"Gradient Accumulation: {accumulation_steps}")
+        self.checkpoint_dir = checkpoint_dir
+
+        print("=" * 70)
+        print("APPEARANCE BRANCH - 150 SOURCE GROUP TEST")
+        print("=" * 70)
+        print(f"Device                : {self.device}")
+        print(f"Batch Size            : {batch_size}")
+        print(f"Gradient Accumulation : {accumulation_steps}")
         print(
-            f"Effective Batch Size : "
+            f"Effective Batch Size  : "
             f"{batch_size * accumulation_steps}"
         )
-        print(f"Epochs               : {num_epochs}")
-        print("=" * 60)
+        print(f"Epochs                : {num_epochs}")
+        print(f"Train CSV             : {train_csv}")
+        print(f"Validation CSV        : {val_csv}")
+        print(f"Checkpoint Directory  : {checkpoint_dir}")
+        print("=" * 70)
 
         # -------------------------------------------------
         # Dataset
         # -------------------------------------------------
+
         self.train_dataset = DeepfakeDataset(
             metadata_csv=train_csv,
             dataset_root=dataset_root,
             split="train",
         )
-        self.train_dataset.df = self.train_dataset.df.iloc[:500].reset_index(drop=True)
 
         self.val_dataset = DeepfakeDataset(
             metadata_csv=val_csv,
             dataset_root=dataset_root,
             split="val",
         )
-        self.val_dataset.df = self.val_dataset.df.iloc[:100].reset_index(drop=True)
+
+        print()
+        print(f"Training samples      : {len(self.train_dataset):,}")
+        print(f"Validation samples    : {len(self.val_dataset):,}")
 
         # -------------------------------------------------
         # DataLoader
@@ -140,7 +141,7 @@ class AppearanceTrainer:
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             drop_last=False,
         )
 
@@ -165,7 +166,7 @@ class AppearanceTrainer:
         )
 
         print(
-            f"Trainable Parameters : "
+            f"Trainable Parameters  : "
             f"{n_trainable:,}"
         )
 
@@ -184,20 +185,20 @@ class AppearanceTrainer:
         # -------------------------------------------------
 
         self.scaler = GradScaler(
-            "cuda",enabled=(self.device == "cuda"),
+            "cuda",
+            enabled=(self.device == "cuda"),
         )
-    def get_gpu_temperature(self):
-        """
-        Returns current NVIDIA GPU temperature in Celsius.
 
-        Returns None if temperature cannot be read.
-        """
+    # =====================================================
+    # GPU Temperature
+    # =====================================================
+
+    def get_gpu_temperature(self):
 
         if self.device != "cuda":
             return None
 
         try:
-
             result = subprocess.run(
                 [
                     "nvidia-smi",
@@ -212,54 +213,43 @@ class AppearanceTrainer:
             if result.returncode != 0:
                 return None
 
-            temperature = int(
+            return int(
                 result.stdout.strip().splitlines()[0]
             )
 
-            return temperature
-
         except Exception:
             return None
-    def check_gpu_temperature(self, epoch, step):
-        """
-        Checks GPU temperature.
 
-        80C  -> warning
-        85C  -> stop training safely
-        """
+    def check_gpu_temperature(self, epoch, step):
 
         temperature = self.get_gpu_temperature()
 
         if temperature is None:
             return False
 
+        # Critical temperature: stop training
         if temperature >= 85:
 
             print()
-            print("=" * 60)
+            print("=" * 70)
             print(
                 f"WARNING: GPU temperature = "
                 f"{temperature}°C"
             )
-            print(
-                "GPU temperature is too high."
-            )
-            print(
-                "Stopping training safely."
-            )
-            print("=" * 60)
+            print("Temperature is too high.")
+            print("Stopping training safely.")
+            print("=" * 70)
 
-            # Save emergency checkpoint
-            self._save_checkpoint(
-                epoch,
-                0.0,
+            self.save_checkpoint(
+                epoch=epoch,
+                val_acc=self.best_val_acc,
                 tag="temperature_stop",
             )
 
             return True
 
-        if temperature >= 80:
-
+        # Warning temperature: print only every 100 steps
+        if temperature >= 80 and step % 100 == 0:
             print(
                 f"WARNING: GPU temperature = "
                 f"{temperature}°C"
@@ -267,7 +257,7 @@ class AppearanceTrainer:
 
         return False
     # =====================================================
-    # Forward Step
+    # Forward
     # =====================================================
 
     def _forward_step(self, clip):
@@ -277,34 +267,13 @@ class AppearanceTrainer:
             non_blocking=True,
         )
 
-        outputs = self.model(clip)
+        return self.model(clip)
 
-        return outputs
-# =====================================================
-# Train One Epoch
-# =====================================================
+    # =====================================================
+    # Train One Epoch
+    # =====================================================
 
-    def train_one_epoch(
-        self,
-        epoch,
-    ):
-        for step, batch in enumerate(self.train_loader):
-
-            if (step + 1) % 100 == 0:
-                print(
-                    f"Batch {step + 1}/{len(self.train_loader)}"
-                )
-
-            clip = batch["clip"]
-        """
-        Train the model for one epoch.
-
-        Returns
-        -------
-        average_loss : float
-
-        accuracy : float
-        """
+    def train_one_epoch(self, epoch):
 
         self.model.train()
 
@@ -312,13 +281,25 @@ class AppearanceTrainer:
         correct = 0
         total = 0
 
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(
+            set_to_none=True
+        )
 
-        for step, batch in enumerate(self.train_loader):
+        num_steps = len(self.train_loader)
 
-            # ---------------------------------------------
-            # Load batch
-            # ---------------------------------------------
+        for step, batch in enumerate(
+            self.train_loader
+        ):
+
+            if self.check_gpu_temperature(
+                epoch,
+                step + 1,
+            ):
+                return (
+                    running_loss / max(step, 1),
+                    correct / total if total else 0.0,
+                    True,
+                )
 
             clip = batch["clip"]
 
@@ -327,14 +308,17 @@ class AppearanceTrainer:
                 non_blocking=True,
             )
 
-            # ---------------------------------------------
-            # Forward
-            # ---------------------------------------------
-
-            with autocast(device_type=self.device ,enabled=(self.device == "cuda")):
+            with autocast(
+                device_type=(
+                    "cuda"
+                    if self.device == "cuda"
+                    else "cpu"
+                ),
+                enabled=(self.device == "cuda"),
+            ):
 
                 outputs = self._forward_step(
-                    clip,
+                    clip
                 )
 
                 evidence = outputs["evidence"]
@@ -348,30 +332,21 @@ class AppearanceTrainer:
                     device=self.device,
                 )
 
-                # Gradient accumulation
-                loss = (
-                    loss /
-                    self.accumulation_steps
+                loss_for_backward = (
+                    loss
+                    / self.accumulation_steps
                 )
 
-            # ---------------------------------------------
-            # Backward
-            # ---------------------------------------------
-
             self.scaler.scale(
-                loss
+                loss_for_backward
             ).backward()
 
-            # ---------------------------------------------
-            # Optimizer step
-            # ---------------------------------------------
+            should_step = (
+                (step + 1) % self.accumulation_steps == 0
+                or (step + 1) == num_steps
+            )
 
-            if (
-                (step + 1)
-                %
-                self.accumulation_steps
-                == 0
-            ):
+            if should_step:
 
                 self.scaler.step(
                     self.optimizer
@@ -379,20 +354,14 @@ class AppearanceTrainer:
 
                 self.scaler.update()
 
-                self.optimizer.zero_grad()
+                self.optimizer.zero_grad(
+                    set_to_none=True
+                )
 
-            # ---------------------------------------------
-            # Statistics
-            # ---------------------------------------------
-
-            running_loss += (
-                loss.item()
-                *
-                self.accumulation_steps
-            )
+            running_loss += loss.item()
 
             dirichlet = compute_dirichlet(
-                evidence,
+                evidence
             )
 
             prediction = torch.argmax(
@@ -406,46 +375,21 @@ class AppearanceTrainer:
 
             total += label.size(0)
 
-            # ---------------------------------------------
-            # Progress
-            # ---------------------------------------------
-
             if (
-                (step + 1)
-                %
-                20
-                == 0
+                (step + 1) % 20 == 0
+                or (step + 1) == num_steps
             ):
 
                 print(
-                    f"Step "
-                    f"{step + 1}/{len(self.train_loader)}   "
+                    f"Step {step + 1}/{num_steps}   "
                     f"Loss: "
                     f"{running_loss / (step + 1):.4f}"
                 )
 
-        # ---------------------------------------------
-        # Handle remaining gradients
-        # ---------------------------------------------
-
-        if (
-            len(self.train_loader)
-            %
-            self.accumulation_steps
-            != 0
-        ):
-
-            self.scaler.step(
-                self.optimizer,
-            )
-
-            self.scaler.update()
-
-            self.optimizer.zero_grad()
-
         average_loss = (
-            running_loss /
-            len(self.train_loader)
+            running_loss / num_steps
+            if num_steps > 0
+            else 0.0
         )
 
         accuracy = (
@@ -457,41 +401,24 @@ class AppearanceTrainer:
         return (
             average_loss,
             accuracy,
+            False,
         )
+
     # =====================================================
     # Validation
     # =====================================================
 
     @torch.no_grad()
-    def validate(
-        self,
-        epoch,
-    ):
-        """
-        Evaluate the Appearance Branch on the validation set.
-
-        Returns
-        -------
-        average_loss : float
-
-        accuracy : float
-
-        average_uncertainty : float
-        """
+    def validate(self, epoch):
 
         self.model.eval()
 
         running_loss = 0.0
         correct = 0
         total = 0
-
         total_uncertainty = 0.0
 
         for batch in self.val_loader:
-
-            # -----------------------------------------
-            # Load batch
-            # -----------------------------------------
 
             clip = batch["clip"]
 
@@ -500,33 +427,34 @@ class AppearanceTrainer:
                 non_blocking=True,
             )
 
-            # -----------------------------------------
-            # Forward
-            # -----------------------------------------
+            with autocast(
+                device_type=(
+                    "cuda"
+                    if self.device == "cuda"
+                    else "cpu"
+                ),
+                enabled=(self.device == "cuda"),
+            ):
 
-            outputs = self._forward_step(
-                clip,
-            )
+                outputs = self._forward_step(
+                    clip
+                )
 
-            evidence = outputs["evidence"]
+                evidence = outputs["evidence"]
 
-            loss = compute_edl_loss(
-                evidence=evidence,
-                target=label,
-                epoch=epoch,
-                num_classes=self.num_classes,
-                annealing_step=self.annealing_step,
-                device=self.device,
-            )
+                loss = compute_edl_loss(
+                    evidence=evidence,
+                    target=label,
+                    epoch=epoch,
+                    num_classes=self.num_classes,
+                    annealing_step=self.annealing_step,
+                    device=self.device,
+                )
 
             running_loss += loss.item()
 
-            # -----------------------------------------
-            # Dirichlet
-            # -----------------------------------------
-
             dirichlet = compute_dirichlet(
-                evidence,
+                evidence
             )
 
             prediction = torch.argmax(
@@ -547,8 +475,9 @@ class AppearanceTrainer:
             )
 
         average_loss = (
-            running_loss /
-            len(self.val_loader)
+            running_loss / len(self.val_loader)
+            if len(self.val_loader) > 0
+            else 0.0
         )
 
         accuracy = (
@@ -569,17 +498,17 @@ class AppearanceTrainer:
             average_uncertainty,
         )
 
-
     # =====================================================
     # Training Loop
     # =====================================================
 
     def fit(self):
-        """
-        Complete training loop.
-        """
 
-        print("\nStarting training...\n")
+        print()
+        print("=" * 70)
+        print("STARTING 150-SOURCE-GROUP TEST TRAINING")
+        print("=" * 70)
+        print()
 
         for epoch in range(
             1,
@@ -588,16 +517,26 @@ class AppearanceTrainer:
 
             start_time = time.time()
 
-            train_loss, train_acc = self.train_one_epoch(
-                epoch,
+            (
+                train_loss,
+                train_acc,
+                stopped,
+            ) = self.train_one_epoch(
+                epoch
             )
+
+            if stopped:
+                print(
+                    "Training stopped because of GPU temperature."
+                )
+                return
 
             (
                 val_loss,
                 val_acc,
                 val_uncertainty,
             ) = self.validate(
-                epoch,
+                epoch
             )
 
             elapsed = (
@@ -605,25 +544,25 @@ class AppearanceTrainer:
                 - start_time
             )
 
+            print()
             print("=" * 70)
             print(
-                f"Epoch "
-                f"{epoch}/{self.num_epochs}"
+                f"Epoch {epoch}/{self.num_epochs}"
             )
             print("=" * 70)
 
             print(
-                f"Train Loss        : "
+                f"Train Loss          : "
                 f"{train_loss:.4f}"
             )
 
             print(
-                f"Train Accuracy    : "
+                f"Train Accuracy      : "
                 f"{train_acc:.4f}"
             )
 
             print(
-                f"Validation Loss   : "
+                f"Validation Loss     : "
                 f"{val_loss:.4f}"
             )
 
@@ -633,18 +572,18 @@ class AppearanceTrainer:
             )
 
             print(
-                f"Avg Uncertainty   : "
+                f"Avg Uncertainty     : "
                 f"{val_uncertainty:.4f}"
             )
 
             print(
-                f"Time              : "
+                f"Time                : "
                 f"{elapsed:.1f}s"
             )
 
-            # -----------------------------------------
+            # -------------------------------------------------
             # Best checkpoint
-            # -----------------------------------------
+            # -------------------------------------------------
 
             if val_acc > self.best_val_acc:
 
@@ -656,9 +595,9 @@ class AppearanceTrainer:
                     tag="best",
                 )
 
-            # -----------------------------------------
+            # -------------------------------------------------
             # Latest checkpoint
-            # -----------------------------------------
+            # -------------------------------------------------
 
             self.save_checkpoint(
                 epoch=epoch,
@@ -667,6 +606,24 @@ class AppearanceTrainer:
             )
 
             print()
+
+        print("=" * 70)
+        print("TEST TRAINING FINISHED")
+        print("=" * 70)
+        print(
+            f"Best Validation Accuracy : "
+            f"{self.best_val_acc:.4f}"
+        )
+        print(
+            "Best checkpoint           : "
+            f"{os.path.join(self.checkpoint_dir, 'best.pt')}"
+        )
+        print(
+            "Next step                : "
+            "evaluate using data/split/test_150/test.csv"
+        )
+        print("=" * 70)
+
     # =====================================================
     # Save Checkpoint
     # =====================================================
@@ -677,24 +634,14 @@ class AppearanceTrainer:
         val_acc,
         tag="last",
     ):
-        """
-        Save model checkpoint.
-        """
 
         checkpoint = {
-
             "epoch": epoch,
-
             "model_state": self.model.state_dict(),
-
             "optimizer_state": self.optimizer.state_dict(),
-
             "scaler_state": self.scaler.state_dict(),
-
             "best_val_acc": self.best_val_acc,
-
             "val_acc": val_acc,
-
         }
 
         path = os.path.join(
@@ -712,67 +659,36 @@ class AppearanceTrainer:
         )
 
 
-    # =====================================================
-    # Load Checkpoint
-    # =====================================================
+# =========================================================
+# MAIN
+# =========================================================
 
-    def load_checkpoint(
-        self,
-        checkpoint_path,
-    ):
-        """
-        Resume training from a checkpoint.
-        """
-
-        checkpoint = torch.load(
-            checkpoint_path,
-            map_location=self.device,
-        )
-
-        self.model.load_state_dict(
-            checkpoint["model_state"]
-        )
-
-        self.optimizer.load_state_dict(
-            checkpoint["optimizer_state"]
-        )
-
-        self.scaler.load_state_dict(
-            checkpoint["scaler_state"]
-        )
-
-        self.best_val_acc = checkpoint[
-            "best_val_acc"
-        ]
-
-        print(
-            f"Loaded checkpoint "
-            f"(Epoch {checkpoint['epoch']})"
-        )
-
-        return checkpoint["epoch"]
 if __name__ == "__main__":
 
-    trainer = AppearanceTrainer(
-
-        train_csv="data/split/train.csv",
-
-        val_csv="data/split/val.csv",
-
+    trainer = AppearanceTestTrainer(
+        train_csv="data/split/test_150/train.csv",
+        val_csv="data/split/test_150/val.csv",
         dataset_root="data/raw",
 
-        checkpoint_dir="checkpoints/appearance",
+        # IMPORTANT:
+        # Separate from the normal appearance checkpoints.
+        checkpoint_dir="checkpoints/appearance_test_150",
 
-        batch_size=2,
-
-        accumulation_steps=8,
+        batch_size=4,
+        accumulation_steps=4,
 
         lr=1e-4,
-        num_epochs=1,
-        # num_epochs=30,
+        weight_decay=1e-4,
+
+        # Small test run:
+        num_epochs=3,
+
+        num_classes=2,
+        annealing_step=10,
 
         freeze_backbone=True,
 
+        num_workers=4,
     )
 
     trainer.fit()

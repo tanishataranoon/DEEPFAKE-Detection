@@ -29,7 +29,7 @@ from models.heads.evidence_head import compute_dirichlet
 # CONFIG
 # ============================================================
 
-VAL_CSV = "data/split/val.csv"
+VAL_CSV = "data/split/small/val.csv"
 DATASET_ROOT = "data/raw"
 
 CHECKPOINT = "checkpoints/appearance/best.pt"
@@ -65,7 +65,9 @@ def main():
         split="val",
         image_size=224,
     )
-
+    print(f"Validation samples : {len(dataset)}")
+    print(dataset.df["label"].value_counts())
+    
     loader = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
@@ -129,7 +131,7 @@ def main():
     model.load_state_dict(state_dict)
 
     model.eval()
-
+    torch.cuda.empty_cache()
     print()
     print("Checkpoint loaded successfully.")
     print()
@@ -158,7 +160,7 @@ def main():
     # --------------------------------------------------------
     # Evaluation
     # --------------------------------------------------------
-
+from torch.amp import autocast
     with torch.no_grad():
 
         for step, batch in enumerate(loader):
@@ -167,15 +169,16 @@ def main():
                 device,
                 non_blocking=True,
             )
-
-            labels = batch["label"].to(device)
+            with autocast(
+                        device_type="cuda",
+                        enabled=(DEVICE=="cuda")
+                    ):
+                        outputs = model(clip)
+                labels = batch["label"].to(device)
 
             # -----------------------------------------------
             # Forward
             # -----------------------------------------------
-
-            outputs = model(clip)
-
             evidence = outputs["evidence"]
             attention = outputs["attention"]
 
