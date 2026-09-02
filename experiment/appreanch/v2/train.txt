@@ -1,0 +1,318 @@
+Validation CSV        : data/split/test_150/val.csv
+Checkpoint Directory  : checkpoints/appearance_test_150
+======================================================================
+
+Training samples      : 45,652
+Validation samples    : 11,067
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 173/173 [00:00<00:00, 13833.35it/s]
+Trainable Parameters  : 525,571
+
+======================================================================
+STARTING 150-SOURCE-GROUP TEST TRAINING
+======================================================================
+
+======================================================================
+Epoch 1/10
+======================================================================
+Train Loss          : 0.2905
+Train Accuracy      : 0.8400
+Validation Loss     : 0.4523
+Validation Accuracy : 0.7131
+Avg Uncertainty     : 0.2714
+Time                : 8276.8s
+
+
+======================================================================
+Epoch 2/10
+======================================================================
+Train Loss          : 0.1831
+Train Accuracy      : 0.9084
+Validation Loss     : 0.3136
+Validation Accuracy : 0.8226
+Avg Uncertainty     : 0.2708
+Time                : 8266.6s
+
+
+======================================================================
+Epoch 3/10
+======================================================================
+Train Loss          : 0.1593
+Train Accuracy      : 0.9250
+Validation Loss     : 0.3135
+Validation Accuracy : 0.8267
+Avg Uncertainty     : 0.2684
+Time                : 8276.1s
+
+======================================================================
+Epoch 10/10
+======================================================================
+Train Loss          : 0.1134
+Train Accuracy      : 0.9551
+Validation Loss     : 0.3367
+Validation Accuracy : 0.8508
+Avg Uncertainty     : 0.2624
+Time                : 7764.9s
+Checkpoint saved -> checkpoints/appearance_test_150\best.pt
+New best validation accuracy: 0.8508
+Checkpoint saved -> checkpoints/appearance_test_150\last.pt
+
+======================================================================
+TEST TRAINING FINISHED
+======================================================================
+Best Validation Accuracy : 0.8508
+Best checkpoint           : checkpoints/appearance_test_150\best.pt
+Next step                : evaluate using data/split/test_150/test.csv
+======================================================================
+
+================================================================
+TRAINING FINISHED SUCCESSFULLY
+STARTING EVALUATION...
+================================================================
+
+======================================================================
+APPEARANCE BRANCH - 150 SOURCE GROUP TEST EVALUATION
+======================================================================
+
+Device       : cuda
+Checkpoint   : checkpoints/appearance_test_150/best.pt
+Test CSV     : data/split/test_150/test.csv
+GPU          : NVIDIA GeForce RTX 4080
+
+Test samples : 11,151
+
+Label distribution:
+label
+fake    9612
+real    1539
+Name: count, dtype: int64
+
+Evaluation batches : 697
+
+Loading Appearance Classifier...
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 173/173 [00:00<00:00, 11573.17it/s]
+Appearance Classifier created.
+
+Loading checkpoint...
+
+Checkpoint keys:
+  epoch
+  model_state
+  optimizer_state
+  scaler_state
+  best_val_acc
+  val_acc
+
+Loading trained model weights...
+
+Checkpoint loaded successfully.
+
+======================================================================
+STARTING TEST EVALUATION
+======================================================================
+
+======================================================================
+Epoch 10/10
+======================================================================
+Train Loss          : 0.1134
+Train Accuracy      : 0.9551
+Validation Loss     : 0.3367
+Validation Accuracy : 0.8508
+Avg Uncertainty     : 0.2624
+Time                : 7764.9s
+Checkpoint saved -> checkpoints/appearance_test_150\best.pt
+New best validation accuracy: 0.8508
+Checkpoint saved -> checkpoints/appearance_test_150\last.pt
+
+======================================================================
+TEST TRAINING FINISHED
+======================================================================
+Best Validation Accuracy : 0.8508
+Best checkpoint           : checkpoints/appearance_test_150\best.pt
+Next step                : evaluate using data/split/test_150/test.csv
+======================================================================
+
+================================================================
+TRAINING FINISHED SUCCESSFULLY
+STARTING EVALUATION...
+================================================================
+
+======================================================================
+APPEARANCE BRANCH - 150 SOURCE GROUP TEST EVALUATION
+======================================================================
+
+Device       : cuda
+Checkpoint   : checkpoints/appearance_test_150/best.pt
+Test CSV     : data/split/test_150/test.csv
+GPU          : NVIDIA GeForce RTX 4080
+
+Test samples : 11,151
+
+Label distribution:
+label
+fake    9612
+real    1539
+Name: count, dtype: int64
+
+Evaluation batches : 697
+
+Loading Appearance Classifier...
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 173/173 [00:00<00:00, 11573.17it/s]
+Appearance Classifier created.
+
+Loading checkpoint...
+
+Checkpoint keys:
+  epoch
+  model_state
+  optimizer_state
+  scaler_state
+  best_val_acc
+  val_acc
+
+Loading trained model weights...
+
+Checkpoint loaded successfully.
+
+======================================================================
+STARTING TEST EVALUATION
+======================================================================
+
+[transformers] `use_return_dict` is deprecated! Use `return_dict` instead!
+Evaluated batch 25/697
+Evaluated batch 50/697
+Evaluated batch 75/697
+Evaluated batch 100/697
+Evaluated batch 125/697
+Evaluated batch 150/697
+Evaluated batch 175/697
+Evaluated batch 200/697
+Evaluated batch 225/697
+Evaluated batch 250/697
+Evaluated batch 275/697
+Evaluated batch 300/697
+Evaluated batch 325/697
+Evaluated batch 350/697
+Evaluated batch 375/697
+Evaluated batch 400/697
+Evaluated batch 425/697
+Evaluated batch 450/697
+Evaluated batch 475/697
+Evaluated batch 500/697
+Evaluated batch 525/697
+Evaluated batch 550/697
+Evaluated batch 575/697
+Evaluated batch 600/697
+Evaluated batch 625/697
+Evaluated batch 650/697
+Evaluated batch 675/697
+Evaluated batch 697/697
+
+======================================================================
+APPEARANCE BRANCH - 150 SOURCE GROUP TEST RESULTS
+======================================================================
+
+Total samples        : 11,151
+Correct predictions  : 9,332
+Incorrect predictions: 1,819
+
+Overall Metrics
+-----------------------------------
+Accuracy             : 0.8369
+Balanced Accuracy    : 0.7801
+Precision            : 0.9473
+Recall               : 0.8585
+F1                   : 0.9007
+
+Class Recall
+-----------------------------------
+Real Recall          : 0.7018
+Fake Recall          : 0.8585
+
+Confusion Matrix
+-----------------------------------
+
+                 Predicted
+                 Real    Fake
+Actual Real        1080     459
+Actual Fake        1360    8252
+
+EDL Uncertainty
+-----------------------------------
+Average uncertainty   : 0.2674
+Correct predictions   : 0.2259
+Incorrect predictions : 0.4804
+
+Checkpoint epoch     : 10
+Best validation acc  : 0.8508
+Checkpoint val acc   : 0.8508
+
+======================================================================
+Evaluation complete.
+======================================================================
+
+================================================================
+EVALUATION FINISHED SUCCESSFULLY
+STARTING VISUALIZATION...
+================================================================
+
+============================================================
+APPEARANCE BRANCH BASELINE VISUALIZATION
+============================================================
+
+Test CSV:
+F:\169\DEEPFAKE-Detection\data\split\test_150\test.csv
+
+CSV rows: 11,151
+
+Actual CSV label distribution:
+label
+fake    9612
+real    1539
+Name: count, dtype: int64
+  Fake: 9,612
+  Real: 1,539
+
+Saved metrics:
+F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline\baseline_metrics.json
+Saved: F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline\figures\01_class_distribution.png
+Saved: F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline\figures\02_confusion_matrix.png
+Saved: F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline\figures\03_accuracy_comparison.png
+Saved: F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline\figures\04_class_recall.png
+Saved: F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline\figures\05_uncertainty_comparison.png
+Saved: F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline\figures\06_model_vs_all_fake_baseline.png
+Saved: F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline\README.txt
+
+============================================================
+BASELINE VISUALIZATION COMPLETE
+============================================================
+
+Output directory:
+F:\169\DEEPFAKE-Detection\runs\appearance_test_150\baseline
+
+Figures:
+  - 01_class_distribution.png
+  - 02_confusion_matrix.png
+  - 03_accuracy_comparison.png
+  - 04_class_recall.png
+  - 05_uncertainty_comparison.png
+  - 06_model_vs_all_fake_baseline.png
+
+Metrics:
+  - baseline_metrics.json
+
+Documentation:
+  - README.txt
+
+Current conclusion:
+  The Appearance Branch is effectively predicting FAKE
+  for almost every sample.
+
+IMPORTANT:
+  Do NOT change the model yet.
+  Preserve this as the BEFORE/FIX baseline.
+
+================================================================
+EVERYTHING FINISHED SUCCESSFULLY
+================================================================
+
+Press any key to continue . . . 

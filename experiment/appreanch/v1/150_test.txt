@@ -1,0 +1,114 @@
+(.venv_cuda) PS F:\169\DEEPFAKE-Detection> python .\evalution\appearanch_branch\150_appreanch_evaluate.py
+======================================================================
+APPEARANCE BRANCH - 150 SOURCE GROUP TEST EVALUATION
+======================================================================
+
+Device       : cuda
+Checkpoint   : checkpoints/appearance_test_150/best.pt
+Test CSV     : data/split/test_150/test.csv
+GPU          : NVIDIA GeForce RTX 4080
+
+Test samples : 11,151
+
+Label distribution:
+label   
+fake    9612
+real    1539
+Name: count, dtype: int64
+
+Evaluation batches : 697
+
+Loading Appearance Classifier...
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████| 173/173 [00:00<00:00, 10249.23it/s]
+Appearance Classifier created.
+
+Loading checkpoint...
+
+Checkpoint keys:
+  epoch
+  model_state
+  optimizer_state
+  scaler_state
+  best_val_acc
+  val_acc
+
+Loading trained model weights...
+
+Checkpoint loaded successfully.
+
+======================================================================
+STARTING TEST EVALUATION
+======================================================================
+
+[transformers] `use_return_dict` is deprecated! Use `return_dict` instead!
+Evaluated batch 25/697
+Evaluated batch 50/697
+Evaluated batch 75/697
+Evaluated batch 100/697
+Evaluated batch 125/697
+Evaluated batch 150/697
+Evaluated batch 175/697
+Evaluated batch 200/697
+Evaluated batch 225/697
+Evaluated batch 250/697
+Evaluated batch 275/697
+Evaluated batch 300/697
+Evaluated batch 325/697
+Evaluated batch 350/697
+Evaluated batch 375/697
+Evaluated batch 400/697
+Evaluated batch 425/697
+Evaluated batch 450/697
+Evaluated batch 475/697
+Evaluated batch 500/697
+Evaluated batch 525/697
+Evaluated batch 550/697
+Evaluated batch 575/697
+Evaluated batch 600/697
+Evaluated batch 625/697
+Evaluated batch 650/697
+Evaluated batch 675/697
+Evaluated batch 697/697
+
+======================================================================
+APPEARANCE BRANCH - 150 SOURCE GROUP TEST RESULTS
+======================================================================
+
+Total samples        : 11,151
+Correct predictions  : 9,613
+Incorrect predictions: 1,538
+
+Overall Metrics
+-----------------------------------
+Accuracy             : 0.8621
+Balanced Accuracy    : 0.5003
+Precision            : 0.8621
+Recall               : 1.0000
+F1                   : 0.9259
+
+Class Recall
+-----------------------------------
+Real Recall          : 0.0006
+Fake Recall          : 1.0000
+
+Confusion Matrix
+-----------------------------------
+
+                 Predicted
+                 Real    Fake
+Actual Real           1    1538
+Actual Fake           0    9612
+
+EDL Uncertainty
+-----------------------------------
+Average uncertainty   : 0.1559
+Correct predictions   : 0.1494
+Incorrect predictions : 0.1965
+
+Checkpoint epoch     : 1
+Best validation acc  : 0.8570
+Checkpoint val acc   : 0.8570
+
+======================================================================
+Evaluation complete.
+======================================================================

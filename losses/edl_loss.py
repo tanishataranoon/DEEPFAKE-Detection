@@ -49,7 +49,8 @@ def compute_kl_divergence(alpha, num_classes, device):
     return kl
 
 
-def compute_edl_loss(evidence, target, epoch, num_classes, annealing_step, device = None):
+def compute_edl_loss(evidence, target, epoch, num_classes, annealing_step,
+                      class_weights=None, device=None):
     """
     evidence       : (B, K) non-negative evidence from EvidenceHead
     target         : (B,) integer class labels (0 = real, 1 = fake)
@@ -60,24 +61,21 @@ def compute_edl_loss(evidence, target, epoch, num_classes, annealing_step, devic
     """
     if device is None:
         device = evidence.device
-    y = F.one_hot(target, num_classes=num_classes).float().to(device) #(B,K)
+    y = F.one_hot(target, num_classes=num_classes).float().to(device)
 
-    alpha = evidence + 1 #(B,K)
-    S = torch.sum(alpha, dim=1, keepdim=True) #(B,1)
+    alpha = evidence + 1
+    S = torch.sum(alpha, dim=1, keepdim=True)
 
-    err = torch.sum((y - alpha / S) ** 2, dim=1, keepdim=True)
-    var = torch.sum(alpha * (S - alpha) / (S * S * (S + 1)), dim=1, keepdim=True)
+    if class_weights is not None:
+        w = class_weights.to(device).unsqueeze(0)          # (1, K)
+        err = torch.sum(w * (y - alpha / S) ** 2, dim=1, keepdim=True)
+        var = torch.sum(w * alpha * (S - alpha) / (S * S * (S + 1)), dim=1, keepdim=True)
+    else:
+        err = torch.sum((y - alpha / S) ** 2, dim=1, keepdim=True)
+        var = torch.sum(alpha * (S - alpha) / (S * S * (S + 1)), dim=1, keepdim=True)
+
     loss_mse = err + var
-
-    annealing_coef = torch.tensor(
-        min(1.0, epoch / annealing_step), dtype=torch.float32, device=device
-    )
-
-    # Zero out evidence for the CORRECT class before computing KL,
-    # so the regularizer only discourages evidence for wrong classes
+    annealing_coef = torch.tensor(min(1.0, epoch / annealing_step), dtype=torch.float32, device=device)
     alpha_tilde = y + (1 - y) * alpha
     kl = compute_kl_divergence(alpha_tilde, num_classes, device)
-
-    loss = loss_mse + annealing_coef * kl
-
-    return loss.mean()
+    return (loss_mse + annealing_coef * kl).mean()

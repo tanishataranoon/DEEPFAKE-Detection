@@ -28,6 +28,15 @@ import time
 import subprocess
 import sys
 from pathlib import Path
+import torch
+
+# Fixes the 'all_tied_weights_keys' crash caused by newer Transformers versions
+_orig_getattr = torch.nn.Module.__getattr__
+def _patched_getattr(self, name):
+    if name == "all_tied_weights_keys":
+        return {}
+    return _orig_getattr(self, name)
+torch.nn.Module.__getattr__ = _patched_getattr
 
 # =========================================================
 # PROJECT ROOT
@@ -40,11 +49,22 @@ if str(PROJECT_ROOT) not in sys.path:
 import torch
 from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
+from sklearn.metrics import balanced_accuracy_score
 
-from data.dataset.appearance.deepfake_dataset import DeepfakeDataset
+from data.raw.appearanch.dataset import DeepfakeDataset
 from models.appearence.appearance_classifier import AppearanceClassifier
 from models.heads.evidence_head import compute_dirichlet
 from losses.edl_loss import compute_edl_loss
+import numpy as np
+from torch.utils.data import WeightedRandomSampler
+# =========================================================
+# RTX 4080 PERFORMANCE SETTINGS
+# =========================================================
+if torch.cuda.is_available():
+    # RTX 40-series GPUs benefit from TF32 for compatible matrix operations.
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
 
 
 class AppearanceTestTrainer:
@@ -55,16 +75,17 @@ class AppearanceTestTrainer:
         val_csv="data/split/test_150/val.csv",
         dataset_root="data/raw",
         checkpoint_dir="checkpoints/appearance_test_150",
-        batch_size=4,
-        accumulation_steps=4,
+        batch_size=8,
+        accumulation_steps=2,
         lr=1e-4,
         weight_decay=1e-4,
-        num_epochs=3,
+        device=None,
+        num_epochs=10,
         num_classes=2,
         annealing_step=10,
         freeze_backbone=True,
-        num_workers=4,
-        device=None,
+        num_workers=8,
+        early_stopping_patience=2,
     ):
 
         self.device = device or (
@@ -77,6 +98,10 @@ class AppearanceTestTrainer:
         self.num_epochs = num_epochs
         self.num_classes = num_classes
         self.annealing_step = annealing_step
+
+        # Early stopping
+        self.early_stopping_patience = early_stopping_patience
+        self.epochs_without_improvement = 0
 
         self.best_val_acc = -1.0
 
@@ -98,6 +123,8 @@ class AppearanceTestTrainer:
             f"{batch_size * accumulation_steps}"
         )
         print(f"Epochs                : {num_epochs}")
+        print(f"Early Stopping        : patience={early_stopping_patience}")
+
         print(f"Train CSV             : {train_csv}")
         print(f"Validation CSV        : {val_csv}")
         print(f"Checkpoint Directory  : {checkpoint_dir}")
@@ -127,14 +154,37 @@ class AppearanceTestTrainer:
         # DataLoader
         # -------------------------------------------------
 
-        self.train_loader = DataLoader(
-            self.train_dataset,
+        loader_kwargs = dict(
             batch_size=batch_size,
-            shuffle=True,
             num_workers=num_workers,
             pin_memory=torch.cuda.is_available(),
             drop_last=False,
         )
+
+        # Keep workers alive between epochs and prefetch batches so the GPU
+        # spends less time waiting for video/frame loading.
+        if num_workers > 0:
+            loader_kwargs["persistent_workers"] = True
+            loader_kwargs["prefetch_factor"] = 4
+
+        if torch.cuda.is_available():
+            loader_kwargs["pin_memory_device"] = "cuda"
+
+        labels = self.train_dataset.get_labels()          # you'll need to add this method — see below
+        class_counts = np.bincount(labels)
+        sample_weights = 1.0 / class_counts[labels]
+        sampler = WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(labels),
+            replacement=True,
+        )
+        self.train_loader = DataLoader(
+            self.train_dataset,
+            sampler=sampler, 
+            **loader_kwargs,
+        )
+        self.class_weights = torch.tensor(
+            len(labels) / (2.0 * class_counts), dtype=torch.float32)
 
         self.val_loader = DataLoader(
             self.val_dataset,
@@ -143,6 +193,13 @@ class AppearanceTestTrainer:
             num_workers=num_workers,
             pin_memory=torch.cuda.is_available(),
             drop_last=False,
+            persistent_workers=(num_workers > 0),
+            prefetch_factor=4 if num_workers > 0 else None,
+            **(
+                {"pin_memory_device": "cuda"}
+                if torch.cuda.is_available()
+                else {}
+            ),
         )
 
         # -------------------------------------------------
@@ -291,15 +348,17 @@ class AppearanceTestTrainer:
             self.train_loader
         ):
 
-            if self.check_gpu_temperature(
-                epoch,
-                step + 1,
-            ):
-                return (
-                    running_loss / max(step, 1),
-                    correct / total if total else 0.0,
-                    True,
-                )
+            # Check GPU temperature every 100 steps
+            if (step + 1) % 100 == 0:
+                if self.check_gpu_temperature(
+                    epoch,
+                    step + 1,
+                ):
+                    return (
+                        running_loss / max(step, 1),
+                        correct / total if total else 0.0,
+                        True,
+                    )
 
             clip = batch["clip"]
 
@@ -581,32 +640,79 @@ class AppearanceTestTrainer:
                 f"{elapsed:.1f}s"
             )
 
-            # -------------------------------------------------
-            # Best checkpoint
-            # -------------------------------------------------
+        # -------------------------------------------------
+        # Best checkpoint + Early Stopping
+        # -------------------------------------------------
 
-            if val_acc > self.best_val_acc:
+        if val_acc > self.best_val_acc:
 
-                self.best_val_acc = val_acc
-
-                self.save_checkpoint(
-                    epoch=epoch,
-                    val_acc=val_acc,
-                    tag="best",
-                )
-
-            # -------------------------------------------------
-            # Latest checkpoint
-            # -------------------------------------------------
+            # New best validation accuracy
+            self.best_val_acc = val_acc
+            self.epochs_without_improvement = 0
 
             self.save_checkpoint(
                 epoch=epoch,
                 val_acc=val_acc,
-                tag="last",
+                tag="best",
             )
 
-            print()
+            print(
+                f"New best validation accuracy: "
+                f"{val_acc:.4f}"
+            )
 
+        else:
+
+            # No improvement this epoch
+            self.epochs_without_improvement += 1
+
+            print(
+                f"No validation improvement. "
+                f"Early stopping patience: "
+                f"{self.epochs_without_improvement}/"
+                f"{self.early_stopping_patience}"
+            )
+
+        # -------------------------------------------------
+        # Latest checkpoint
+        # -------------------------------------------------
+
+        self.save_checkpoint(
+            epoch=epoch,
+            val_acc=val_acc,
+            tag="last",
+        )
+
+        # -------------------------------------------------
+        # Early stopping check
+        # -------------------------------------------------
+
+        if (
+            self.epochs_without_improvement
+            >= self.early_stopping_patience
+        ):
+
+            print()
+            print("=" * 70)
+            print("EARLY STOPPING")
+            print("=" * 70)
+            print(
+                f"Validation accuracy did not improve for "
+                f"{self.early_stopping_patience} consecutive epochs."
+            )
+            print(
+                f"Best Validation Accuracy : "
+                f"{self.best_val_acc:.4f}"
+            )
+            print(
+                f"Best checkpoint           : "
+                f"{os.path.join(self.checkpoint_dir, 'best.pt')}"
+            )
+            print("=" * 70)
+
+            return
+
+        print()
         print("=" * 70)
         print("TEST TRAINING FINISHED")
         print("=" * 70)
@@ -674,21 +780,19 @@ if __name__ == "__main__":
         # Separate from the normal appearance checkpoints.
         checkpoint_dir="checkpoints/appearance_test_150",
 
-        batch_size=4,
-        accumulation_steps=4,
+        batch_size=8,
+        accumulation_steps=2,
 
         lr=1e-4,
         weight_decay=1e-4,
 
         # Small test run:
-        num_epochs=3,
-
+        num_epochs=10,
         num_classes=2,
         annealing_step=10,
-
         freeze_backbone=True,
-
-        num_workers=4,
+        num_workers=8,
+        early_stopping_patience=2,
     )
 
     trainer.fit()
