@@ -1,0 +1,102 @@
+================================================================
+AUTOMATED APPEARANCE EXPERIMENT - FULL DATASET
+================================================================
+
+PROJECT : E:\Depfake\DEEPFAKE-Detection
+PYTHON  : E:\Depfake\DEEPFAKE-Detection\.venv\Scripts\python.exe
+
+Python executable found.
+
+Log file:
+runs\appearance_logs\appearance_experiment_30-09-Wed_02-51.txt
+
+================================================================
+CHECKING GPU
+================================================================
+
+PyTorch: 2.14.0+cu126
+CUDA available: True
+CUDA: 12.6
+GPU: NVIDIA GeForce RTX 4090
+
+================================================================
+TRAINING STARTING
+================================================================
+
+==============================================================================
+APPEARANCE BRANCH - FULL DATASET TRAINING
+==============================================================================
+Device                  : cuda
+GPU                     : NVIDIA GeForce RTX 4090
+Batch size              : 16
+Gradient accumulation   : 1
+Effective batch size    : 16
+AIMv2 last N blocks     : 4
+AIMv2 learning rate     : 1.00e-05
+Head/pooling LR         : 5.00e-05
+Weight decay            : 1.00e-04
+Maximum epochs          : 30
+Early stopping patience : 5
+Uncertainty threshold   : 0.50
+Gradient clip norm      : 1.00
+Class balancing         : WeightedRandomSampler
+EDL class weights       : Disabled
+Train CSV               : data/split/train.csv
+Validation CSV          : data/split/val.csv
+Checkpoint directory    : checkpoints/appearance_full
+==============================================================================
+============================================================
+DeepfakeDataset
+============================================================
+CSV          : data\split\train.csv
+Video root   : E:\Depfake\DEEPFAKE-Detection\data\raw
+Samples      : 127691
+Real samples : 16768
+Fake samples : 110923
+Frame count  : 16
+Image size   : 224x224
+============================================================
+============================================================
+DeepfakeDataset
+============================================================
+CSV          : data\split\val.csv
+Video root   : E:\Depfake\DEEPFAKE-Detection\data\raw
+Samples      : 30644
+Real samples : 3474
+Fake samples : 27170
+Frame count  : 16
+Image size   : 224x224
+============================================================
+
+Training samples        : 127,691
+Validation samples      : 30,644
+
+Training class distribution:
+------------------------------------------------------------------------------
+  Class 0 (Real): 16,768
+  Class 1 (Fake): 110,923
+
+Creating WeightedRandomSampler...
+Class balancing will be handled by the sampler.
+EDL class weighting is disabled to avoid double correction.
+
+Training batches        : 7,981
+Validation batches      : 1,916
+
+Loading weights:   0%|          | 0/221 [00:00<?, ?it/s]
+Loading weights: 100%|##########| 221/221 [00:00<00:00, 11937.43it/s]
+
+Parameter summary
+------------------------------------------------------------------------------
+Total parameters        : 309,723,395
+Trainable parameters    : 51,913,987
+Frozen parameters       : 257,809,408
+Trainable AIMv2         : 51,388,416
+Trainable head/pooling  : 525,571
+
+Optimizer AIMv2 params : 51,388,416
+Optimizer head params  : 525,571
+
+==============================================================================
+STARTING FULL-DATASET APPEARANCE TRAINING
+==============================================================================

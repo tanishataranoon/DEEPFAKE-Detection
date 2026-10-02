@@ -1,0 +1,35 @@
+{
+  "total_samples": 29915,
+  "accuracy": 0.9498579308039445,
+  "balanced_accuracy": 0.8979805445163778,
+  "precision": 0.9799414960300877,
+  "recall_fake": 0.9636866290581686,
+  "f1": 0.9717460915426633,
+  "real_recall": 0.832274459974587,
+  "fake_recall": 0.9636866290581686,
+  "confusion_matrix": [
+    [
+      2620,
+      528
+    ],
+    [
+      972,
+      25795
+    ]
+  ],
+  "average_uncertainty": 0.02679334208369255,
+  "correct_prediction_uncertainty": 0.021563268861547046,
+  "incorrect_prediction_uncertainty": 0.12586834091320634,
+  "uncertainty_threshold": 0.5,
+  "uncertain_count": 139,
+  "uncertain_rate": 0.004646498412167809,
+  "decisive_count": 29776,
+  "decisive_accuracy": 0.9520754970445997,
+  "three_state_counts": {
+    "real": 3520,
+    "fake": 26256,
+    "uncertain": 139
+  },
+  "checkpoint_epoch": 12,
+  "best_validation_balanced_accuracy": 0.8556942163977888
+}
