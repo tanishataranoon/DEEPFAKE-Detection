@@ -1,0 +1,93 @@
+(.venv) (base) PS E:\Depfake\DEEPFAKE-Detection> python evalution\appearanch_branch\xai\appearance_xai.py --inspect
+========================================================================
+APPEARANCE BRANCH XAI
+========================================================================
+Project root : E:\Depfake\DEEPFAKE-Detection
+Device       : cuda
+GPU          : NVIDIA GeForce RTX 4090
+Checkpoint   : E:\Depfake\DEEPFAKE-Detection\checkpoints\appearance_full\best.pt
+Method       : gradcam
+Target       : pred
+Threshold    : 0.5
+========================================================================
+
+[model] building AppearanceClassifier...
+Loading weights: 100%|████████████████████████████████████████████████████████████████████████████████████████████| 221/221 [00:00<00:00, 16648.25it/s]
+[model] checkpoint loaded: E:\Depfake\DEEPFAKE-Detection\checkpoints\appearance_full\best.pt
+[model] missing keys   : 0
+[model] unexpected keys: 0
+[model] parameters        : 309,723,395
+[model] gradient-enabled   : 309,723,395
+[model] XAI gradient mode  : ENABLED
+
+[dataset] loading test dataset...
+CachedClipDataset: 29,915 clips from E:\Depfake\DEEPFAKE-Detection\data\cache\test
+[dataset] test samples: 29,915
+[blocks] using AIMv2 encoder.layers (24 layers)
+[hook] registered on AIMv2 block 23/23
+
+
+========================================================================
+APPEARANCE XAI INSPECTION
+========================================================================
+Project root : E:\Depfake\DEEPFAKE-Detection
+Checkpoint   : E:\Depfake\DEEPFAKE-Detection\checkpoints\appearance_full\best.pt
+Test CSV     : E:\Depfake\DEEPFAKE-Detection\data\split\test.csv
+Test cache   : E:\Depfake\DEEPFAKE-Detection\data\cache\test
+Dataset size : 29,915
+CAM block    : AIMv2 block 23/23
+Patch grid   : 16 x 16
+Patch count  : 256
+
+--- MODEL MODULES ---
+backbone             AppearanceModel
+head                 EvidenceHead
+
+--- AIMv2 BLOCKS ---
+[blocks] using AIMv2 encoder.layers (24 layers)
+Number of blocks: 24
+Selected block : 23
+Block type     : Aimv2EncoderLayer
+
+--- DATASET SAMPLE ---
+Clip shape : (16, 3, 224, 224)
+Clip dtype : torch.uint8
+Clip min   : 0.000
+Clip max   : 210.000
+Label      : 0
+
+--- MODEL OUTPUT ---
+Output keys : ['evidence', 'features', 'attention']
+Evidence    : [[35.28509521484375, 1.4628061073501994e-21]]
+E:\Depfake\DEEPFAKE-Detection\evalution\appearanch_branch\xai\appearance_xai.py:1536: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\torch\csrc\autograd\generated\python_variable_methods.cpp:821.)
+  f"{float(edl['probability'][0,0]):.6f}"
+P(Real)     : 0.973180
+P(Fake)     : 0.026820
+Uncertainty : 0.053641
+Prediction  : REAL
+
+--- FRAME ATTENTION ---
+Frame 01: 0.037266
+Frame 02: 0.032362
+Frame 03: 0.032714
+Frame 04: 0.057061
+Frame 05: 0.014610
+Frame 06: 0.024150
+Frame 07: 0.033161
+Frame 08: 0.152005
+Frame 09: 0.038475
+Frame 10: 0.037097
+Frame 11: 0.142714
+Frame 12: 0.081767
+Frame 13: 0.042830
+Frame 14: 0.029549
+Frame 15: 0.127881
+Frame 16: 0.116359
+
+--- HOOKED ACTIVATION ---
+Activation shape: (16, 256, 1024)
+
+Inspection complete.
+If the activation shape is approximately (16,256,1024), the CAM token mapping is correct.
+========================================================================

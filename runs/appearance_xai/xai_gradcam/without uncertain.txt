@@ -1,0 +1,159 @@
+(.venv) (base) PS E:\Depfake\DEEPFAKE-Detection> python evalution\appearanch_branch\xai\appearance_xai.py --auto-pick 4 --scan 400 --tag xai_gradcam
+========================================================================
+APPEARANCE BRANCH XAI
+========================================================================
+Project root : E:\Depfake\DEEPFAKE-Detection
+Device       : cuda
+GPU          : NVIDIA GeForce RTX 4090
+Checkpoint   : E:\Depfake\DEEPFAKE-Detection\checkpoints\appearance_full\best.pt
+Method       : gradcam
+Target       : pred
+Threshold    : 0.5
+========================================================================
+
+[model] building AppearanceClassifier...
+Loading weights: 100%|████████████████████████████████████████████████████████████████████████████████████████████| 221/221 [00:00<00:00, 12610.93it/s]
+[model] checkpoint loaded: E:\Depfake\DEEPFAKE-Detection\checkpoints\appearance_full\best.pt
+[model] missing keys   : 0
+[model] unexpected keys: 0
+[model] parameters        : 309,723,395
+[model] gradient-enabled   : 309,723,395
+[model] XAI gradient mode  : ENABLED
+
+[dataset] loading test dataset...
+CachedClipDataset: 29,915 clips from E:\Depfake\DEEPFAKE-Detection\data\cache\test
+[dataset] test samples: 29,915
+[blocks] using AIMv2 encoder.layers (24 layers)
+[hook] registered on AIMv2 block 23/23
+
+[pick] scanning 400 test samples...
+  scanned 50/400
+  scanned 100/400
+  scanned 150/400
+  scanned 200/400
+  scanned 250/400
+  scanned 300/400
+  scanned 350/400
+  scanned 400/400
+
+[pick] results:
+  correct_real   : [1326, 3107, 2416, 2040]
+  correct_fake   : [27670, 12623, 29171, 13781]
+  false_fake     : [3056, 2063, 2037, 874]
+  false_real     : [4815, 28674, 22240, 14764]
+  uncertain      : [24836]
+
+[output] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam
+
+------------------------------------------------------------------------
+[1/17] category=correct_real index=1326
+[ok] true=REAL pred=REAL P(fake)=0.0067 uncertainty=0.0134
+[frames] top attention: 1, 2, 4, 6
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\correct_real_1326.png
+
+------------------------------------------------------------------------
+[2/17] category=correct_real index=3107
+[ok] true=REAL pred=REAL P(fake)=0.0152 uncertainty=0.0305
+[frames] top attention: 3, 9, 14, 15
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\correct_real_3107.png
+
+------------------------------------------------------------------------
+[3/17] category=correct_real index=2416
+[ok] true=REAL pred=REAL P(fake)=0.0090 uncertainty=0.0181
+[frames] top attention: 7, 8, 12, 15
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\correct_real_2416.png
+
+------------------------------------------------------------------------
+[4/17] category=correct_real index=2040
+[ok] true=REAL pred=REAL P(fake)=0.0737 uncertainty=0.1474
+[frames] top attention: 1, 3, 4, 5
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\correct_real_2040.png
+
+------------------------------------------------------------------------
+[5/17] category=correct_fake index=27670
+[ok] true=FAKE pred=FAKE P(fake)=0.9910 uncertainty=0.0179
+[frames] top attention: 2, 7, 8, 16
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\correct_fake_27670.png
+
+------------------------------------------------------------------------
+[6/17] category=correct_fake index=12623
+[ok] true=FAKE pred=FAKE P(fake)=0.9962 uncertainty=0.0077
+[frames] top attention: 1, 9, 10, 11
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\correct_fake_12623.png
+
+------------------------------------------------------------------------
+[7/17] category=correct_fake index=29171
+[ok] true=FAKE pred=FAKE P(fake)=0.9953 uncertainty=0.0095
+[frames] top attention: 1, 5, 8, 9
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\correct_fake_29171.png
+
+------------------------------------------------------------------------
+[8/17] category=correct_fake index=13781
+[ok] true=FAKE pred=FAKE P(fake)=0.9957 uncertainty=0.0087
+[frames] top attention: 2, 8, 9, 13
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\correct_fake_13781.png
+
+------------------------------------------------------------------------
+[9/17] category=false_fake index=3056
+[ok] true=REAL pred=FAKE P(fake)=0.9938 uncertainty=0.0124
+[frames] top attention: 6, 8, 9, 16
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\false_fake_3056.png
+
+------------------------------------------------------------------------
+[10/17] category=false_fake index=2063
+[ok] true=REAL pred=FAKE P(fake)=0.9751 uncertainty=0.0498
+[frames] top attention: 5, 6, 8, 10
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\false_fake_2063.png
+
+------------------------------------------------------------------------
+[11/17] category=false_fake index=2037
+[ok] true=REAL pred=FAKE P(fake)=0.8346 uncertainty=0.3306
+[frames] top attention: 4, 7, 10, 16
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\false_fake_2037.png
+
+------------------------------------------------------------------------
+[12/17] category=false_fake index=874
+[ok] true=REAL pred=FAKE P(fake)=0.5648 uncertainty=0.2602
+[frames] top attention: 6, 7, 11, 13
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\false_fake_874.png
+
+------------------------------------------------------------------------
+[13/17] category=false_real index=4815
+[ok] true=FAKE pred=REAL P(fake)=0.1505 uncertainty=0.3005
+[frames] top attention: 1, 2, 3, 4
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\false_real_4815.png
+
+------------------------------------------------------------------------
+[14/17] category=false_real index=28674
+[ok] true=FAKE pred=REAL P(fake)=0.0688 uncertainty=0.1376
+[frames] top attention: 7, 8, 9, 11
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\false_real_28674.png
+
+------------------------------------------------------------------------
+[15/17] category=false_real index=22240
+[ok] true=FAKE pred=REAL P(fake)=0.0518 uncertainty=0.1037
+[frames] top attention: 4, 9, 10, 16
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\false_real_22240.png
+
+------------------------------------------------------------------------
+[16/17] category=false_real index=14764
+[ok] true=FAKE pred=REAL P(fake)=0.1231 uncertainty=0.2461
+[frames] top attention: 7, 8, 12, 14
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\false_real_14764.png
+
+------------------------------------------------------------------------
+[17/17] category=uncertain index=24836
+[ok] true=FAKE pred=UNCERTAIN P(fake)=0.4252 uncertainty=0.6103
+[frames] top attention: 2, 3, 4, 6
+[saved] E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\uncertain_24836.png
+
+
+========================================================================
+XAI COMPLETE
+========================================================================
+Examples : 17
+Output   : E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam
+Summary  : E:\Depfake\DEEPFAKE-Detection\runs\appearance_xai\xai_gradcam\summary.csv
+
+The trained checkpoint was NOT modified.
+========================================================================

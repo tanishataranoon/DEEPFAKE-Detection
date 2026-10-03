@@ -1,0 +1,22 @@
+APPEARANCE XAI - DAY 2 SUMMARY
+============================================================
+clips analysed: 20
+
+Per category (means; descriptive only, n is tiny):
+category        n      u  top10  entropy  border  attn~cam
+correct_real    4  0.052  0.339    0.883   0.448     0.946
+correct_fake    4  0.011  0.282    0.902   0.421     0.945
+false_fake      4  0.163  0.472    0.810   0.422     0.851
+false_real      4  0.197  0.489    0.809   0.447     0.749
+uncertain       4  0.650  0.538    0.790   0.429     0.955
+
+top10 = share of CAM mass in the top 10% patches (higher = more focused)
+entropy = 0 single hotspot .. 1 fully diffuse
+border = share in the outer 2-patch ring
+attn~cam = Spearman between AttentionPooling frame weights and per-frame CAM mass
+
+SANITY CHECK (trained vs randomised weights, same clips)
+  Spearman: mean 0.011  mean|.| 0.024  max 0.070
+  top-10% IoU: mean 0.058
+  PASS: maps from the trained model are clearly different from randomised-model maps.
+  (threshold 0.5 is a rule of thumb, not a standard)
