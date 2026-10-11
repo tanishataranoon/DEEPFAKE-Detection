@@ -1,7 +1,4 @@
 """
-Drop-in replacement for DeepfakeDataset that reads pre-extracted clips.
-Put this next to data/raw/dataset.py.
-
 Returns:
     clip  : uint8 tensor [T, 3, 224, 224]   (NOT divided by 255 - the trainer does that on the GPU)
     label : long tensor

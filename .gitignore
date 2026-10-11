@@ -5,6 +5,7 @@
 .venv/
 venv/
 env/
+runs/
 
 # =========================================================
 # GENERATED CACHE - DO NOT PUSH
@@ -32,6 +33,10 @@ env/
 
 /checkpoints/appearance_full/best.pt
 /checkpoints/appearance_full/last.pt
+/checkpoints/temporal_full/best.pt
+/checkpoints/temporal_full/last.pt
+/checkpoints/temporal_full_ft2/best.pt
+/checkpoints/temporal_full_ft2/last.pt
 
 # =========================================================
 # PYTHON CACHE

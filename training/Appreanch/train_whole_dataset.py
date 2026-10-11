@@ -1,52 +1,48 @@
-
 """
 =========================================================
-Appearance Branch - Full Dataset Training
+Temporal Branch - Full Dataset Training
 =========================================================
+
+Uses the SAME cached face crops as the Appearance Branch.
 
 Train:
     data/split/train.csv
+    data/cache/train/
 
 Validation:
     data/split/val.csv
+    data/cache/val/
 
 Test:
-    data/split/test.csv is NOT used here.
+    data/split/test.csv is NOT used during training.
 
 Model:
-    AppearanceClassifier
-        └── AIMv2-Large
+    TemporalClassifier
+        └── VideoMAE backbone
               ├── first blocks frozen
-              └── last 4 transformer blocks fine-tuned
-        ├── Attention Pooling
+              └── last 4 blocks fine-tuned
         └── Evidence Head
 
 EDL:
     0 = Real
     1 = Fake
 
-"Uncertain" is NOT a learned class.
-It is derived from EDL uncertainty for reporting.
+Uncertain:
+    Not a learned class.
+    It is derived from EDL uncertainty.
 
-Training:
-    Batch size              : 8
-    Gradient accumulation   : 2
-    Effective batch size    : 16
-    AIMv2 learning rate     : 1e-5
-    Head/pooling LR         : 5e-5
-    Weight decay            : 1e-4
-    Maximum epochs          : 30
-    Early stopping patience : 5
-
-Class imbalance:
-    WeightedRandomSampler is used.
-    EDL class weights are NOT additionally applied.
-
-Best checkpoint metric:
-    Validation balanced accuracy
+Main configuration:
+    Batch size              = 16
+    Gradient accumulation   = 1
+    Effective batch size    = 16
+    VideoMAE LR             = 1e-5
+    Head LR                 = 5e-5
+    Epochs                  = 20
+    Fine-tune last 4 blocks
+    Early stopping patience = 3
 
 Output:
-    checkpoints/appearance_full/
+    checkpoints/temporal_full/
         best.pt
         last.pt
         temperature_stop.pt
@@ -78,8 +74,6 @@ from sklearn.metrics import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-DATASET_ROOT = PROJECT_ROOT / "data" / "raw"
-
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -88,18 +82,10 @@ if str(PROJECT_ROOT) not in sys.path:
 # PROJECT IMPORTS
 # =========================================================
 
-from data.raw.dataset import DeepfakeDataset
-from data.raw.cached_dataset import CachedClipDataset
-from torch.utils.data import Subset
+from data.raw.temporal.cached_dataset import CachedClipDataset
 
-from models.appearence.appearance_classifier import (
-    AppearanceClassifier,
-)
-
-from models.heads.evidence_head import (
-    compute_dirichlet,
-)
-
+from models.temporal.temporal_classifier import TemporalClassifier
+from models.heads.evidence_head import compute_dirichlet
 from losses.edl_loss import compute_edl_loss
 
 
@@ -107,72 +93,70 @@ from losses.edl_loss import compute_edl_loss
 # TRAINER
 # =========================================================
 
-class AppearanceTrainer:
-    """
-    Full-dataset trainer for the Appearance Branch.
-
-    Architecture:
-
-        Face clip
-            ↓
-        AIMv2
-            ↓
-        Attention Pooling
-            ↓
-        Evidence Head
-            ↓
-        EDL
-            ↓
-        Real / Fake
-            ↓
-        Uncertainty reporting
-
-    AIMv2:
-        Only the final N transformer blocks are fine-tuned.
-
-    Class imbalance:
-        WeightedRandomSampler is used.
-        No additional EDL class weighting is used.
-    """
+class TemporalTrainer:
 
     def __init__(
         self,
 
         train_csv="data/split/train.csv",
         val_csv="data/split/val.csv",
-        dataset_root="data/raw",
 
-        checkpoint_dir="checkpoints/appearance_full",
+        checkpoint_dir="checkpoints/temporal_full",
 
-        batch_size=8,
-        accumulation_steps=2,
+        # -------------------------------------------------
+        # BATCH CONFIGURATION
+        # -------------------------------------------------
+
+        batch_size=16,
+        accumulation_steps=1,
+
+        # -------------------------------------------------
+        # LEARNING RATES
+        # -------------------------------------------------
 
         backbone_lr=1e-5,
         head_lr=5e-5,
 
         weight_decay=1e-4,
 
-        num_epochs=30,
+        # -------------------------------------------------
+        # TRAINING
+        # -------------------------------------------------
+
+        num_epochs=20,
         num_classes=2,
         annealing_step=10,
 
+        # Fine-tune last 4 VideoMAE blocks
         finetune_last_n_blocks=4,
 
-        num_workers=4,
+        gradient_checkpointing=True,
 
-        early_stopping_patience=5,
+        num_workers=8,
+
+        early_stopping_patience=6,
+
 
         uncertainty_threshold=0.50,
 
         gradient_clip_norm=1.0,
 
+        # -------------------------------------------------
+        # LR SCHEDULER
+        # -------------------------------------------------
+
+        lr_scheduler_factor=0.5,
+        lr_scheduler_patience=1,
+        lr_scheduler_min_lr=1e-7,
+
         device=None,
 
-        # --- speed-ups ---
-        train_cache=None,          # e.g. "data/cache/train"
-        val_cache=None,            # e.g. "data/cache/val"
-        samples_per_epoch=None,    # None = len(train set)
-        val_subset=None,           # None = full val set every epoch
+        # -------------------------------------------------
+        # CACHE
+        # -------------------------------------------------
+
+        train_cache="data/cache/train",
+        val_cache="data/cache/val",
     ):
 
         # =================================================
@@ -187,6 +171,7 @@ class AppearanceTrainer:
             )
         else:
             self.device = device
+
 
         # =================================================
         # CONFIGURATION
@@ -203,9 +188,7 @@ class AppearanceTrainer:
         self.num_classes = num_classes
         self.annealing_step = annealing_step
 
-        self.finetune_last_n_blocks = (
-            finetune_last_n_blocks
-        )
+        self.finetune_last_n_blocks = finetune_last_n_blocks
 
         self.num_workers = num_workers
 
@@ -219,23 +202,11 @@ class AppearanceTrainer:
             uncertainty_threshold
         )
 
-        self.gradient_clip_norm = (
-            gradient_clip_norm
-        )
+        self.gradient_clip_norm = gradient_clip_norm
 
         self.best_balanced_accuracy = -1.0
         self.best_epoch = 0
 
-        # =================================================
-        # DATASET ROOT
-        # =================================================
-
-        self.dataset_root = Path(dataset_root)
-
-        if not self.dataset_root.is_absolute():
-            self.dataset_root = (
-                PROJECT_ROOT / self.dataset_root
-            )
 
         # =================================================
         # CHECKPOINT DIRECTORY
@@ -245,11 +216,12 @@ class AppearanceTrainer:
 
         os.makedirs(
             self.checkpoint_dir,
-            exist_ok=True,
+            exist_ok=True
         )
 
+
         # =================================================
-        # GPU PERFORMANCE SETTINGS
+        # GPU SETTINGS
         # =================================================
 
         if torch.cuda.is_available():
@@ -260,20 +232,21 @@ class AppearanceTrainer:
 
             torch.backends.cudnn.benchmark = True
 
+
         # =================================================
         # CONFIGURATION SUMMARY
         # =================================================
 
         print("=" * 78)
-        print("APPEARANCE BRANCH - FULL DATASET TRAINING")
+        print(
+            "TEMPORAL BRANCH (VideoMAE) - "
+            "FULL DATASET TRAINING"
+        )
         print("=" * 78)
 
-        print(
-            f"Device                  : {self.device}"
-        )
+        print(f"Device                  : {self.device}")
 
         if self.device == "cuda":
-
             print(
                 f"GPU                     : "
                 f"{torch.cuda.get_device_name(0)}"
@@ -295,17 +268,17 @@ class AppearanceTrainer:
         )
 
         print(
-            f"AIMv2 last N blocks     : "
+            f"VideoMAE last N layers  : "
             f"{finetune_last_n_blocks}"
         )
 
         print(
-            f"AIMv2 learning rate     : "
+            f"VideoMAE learning rate  : "
             f"{backbone_lr:.2e}"
         )
 
         print(
-            f"Head/pooling LR         : "
+            f"Head learning rate      : "
             f"{head_lr:.2e}"
         )
 
@@ -345,13 +318,13 @@ class AppearanceTrainer:
         )
 
         print(
-            f"Train CSV               : "
-            f"{train_csv}"
+            f"Train cache             : "
+            f"{train_cache}"
         )
 
         print(
-            f"Validation CSV          : "
-            f"{val_csv}"
+            f"Validation cache        : "
+            f"{val_cache}"
         )
 
         print(
@@ -361,42 +334,42 @@ class AppearanceTrainer:
 
         print("=" * 78)
 
+
+        # =================================================
+        # CHECK CACHE
+        # =================================================
+
+        if not os.path.isdir(train_cache):
+            raise FileNotFoundError(
+                f"Training cache not found: {train_cache}\n"
+                "Run build_all_cache.py first."
+            )
+
+        if not os.path.isdir(val_cache):
+            raise FileNotFoundError(
+                f"Validation cache not found: {val_cache}\n"
+                "Run build_all_cache.py first."
+            )
+
+
         # =================================================
         # DATASETS
         # =================================================
 
-        if train_cache and val_cache:
-            self.train_dataset = CachedClipDataset(train_csv, train_cache)
-            self.val_dataset = CachedClipDataset(val_csv, val_cache)
-        else:
-            self.train_dataset = DeepfakeDataset(
-                metadata_csv=train_csv,
-                video_root=self.dataset_root,
-            )
+        print()
+        print("Loading cached datasets...")
 
-            self.val_dataset = DeepfakeDataset(
-                metadata_csv=val_csv,
-                video_root=self.dataset_root,
-            )
+        self.train_dataset = CachedClipDataset(
+            train_csv,
+            train_cache
+        )
 
-        # Fixed, stratified validation subset (same clips every epoch)
-        if val_subset:
-            vdf = pd.read_csv(val_csv)
-            vlab = vdf["label"].astype(str).str.lower().str.strip().map(
-                {"real": 0, "fake": 1, "0": 0, "1": 1}
-            ).to_numpy()
-            rng = np.random.default_rng(0)
-            per_class = val_subset // 2
-            chosen = []
-            for c in (0, 1):
-                idx = np.where(vlab == c)[0]
-                chosen.append(rng.choice(idx, size=min(per_class, len(idx)), replace=False))
-            chosen = np.sort(np.concatenate(chosen))
-            self.val_dataset = Subset(self.val_dataset, chosen.tolist())
-            print(f"Validation subset       : {len(chosen):,} clips (fixed, class-balanced)")
+        self.val_dataset = CachedClipDataset(
+            val_csv,
+            val_cache
+        )
 
         print()
-
         print(
             f"Training samples        : "
             f"{len(self.train_dataset):,}"
@@ -407,16 +380,14 @@ class AppearanceTrainer:
             f"{len(self.val_dataset):,}"
         )
 
+
         # =================================================
         # CLASS DISTRIBUTION
         # =================================================
 
-        labels = self._get_labels(
-            train_csv
-        )
+        labels = self._get_labels(train_csv)
 
         if labels.size == 0:
-
             raise RuntimeError(
                 "Training dataset contains no labels."
             )
@@ -424,7 +395,6 @@ class AppearanceTrainer:
         if np.any(labels < 0) or np.any(
             labels >= num_classes
         ):
-
             raise ValueError(
                 f"Training labels must be in "
                 f"[0, {num_classes - 1}]. "
@@ -433,7 +403,7 @@ class AppearanceTrainer:
 
         class_counts = np.bincount(
             labels,
-            minlength=num_classes,
+            minlength=num_classes
         ).astype(np.float64)
 
         print()
@@ -451,16 +421,17 @@ class AppearanceTrainer:
             )
 
             print(
-                f"  Class {class_id} ({class_name}): "
+                f"  Class {class_id} "
+                f"({class_name}): "
                 f"{int(count):,}"
             )
 
         if np.any(class_counts == 0):
-
             raise RuntimeError(
-                "At least one class is absent from "
-                "the training split."
+                "At least one class is absent "
+                "from the training split."
             )
+
 
         # =================================================
         # WEIGHTED RANDOM SAMPLER
@@ -478,21 +449,22 @@ class AppearanceTrainer:
         sampler = WeightedRandomSampler(
             weights=torch.as_tensor(
                 sample_weights,
-                dtype=torch.double,
+                dtype=torch.double
             ),
-            num_samples=samples_per_epoch or len(labels),
+            num_samples=len(labels),
             replacement=True,
         )
 
         print(
-            "Class balancing will be handled by "
-            "the sampler."
+            "Class balancing will be handled "
+            "by the sampler."
         )
 
         print(
-            "EDL class weighting is disabled to "
-            "avoid double correction."
+            "EDL class weighting is disabled "
+            "to avoid double correction."
         )
+
 
         # =================================================
         # DATALOADERS
@@ -502,7 +474,9 @@ class AppearanceTrainer:
             batch_size=batch_size,
             sampler=sampler,
             num_workers=num_workers,
-            pin_memory=(self.device == "cuda"),
+            pin_memory=(
+                self.device == "cuda"
+            ),
             drop_last=False,
         )
 
@@ -510,7 +484,9 @@ class AppearanceTrainer:
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            pin_memory=(self.device == "cuda"),
+            pin_memory=(
+                self.device == "cuda"
+            ),
             drop_last=False,
         )
 
@@ -532,22 +508,18 @@ class AppearanceTrainer:
                 "prefetch_factor"
             ] = 4
 
-        # IMPORTANT:
-        # Do NOT use pin_memory_device="cuda".
-        # It is deprecated in the current environment.
 
         self.train_loader = DataLoader(
             self.train_dataset,
-            **train_loader_kwargs,
+            **train_loader_kwargs
         )
 
         self.val_loader = DataLoader(
             self.val_dataset,
-            **val_loader_kwargs,
+            **val_loader_kwargs
         )
 
         print()
-
         print(
             f"Training batches        : "
             f"{len(self.train_loader):,}"
@@ -558,29 +530,28 @@ class AppearanceTrainer:
             f"{len(self.val_loader):,}"
         )
 
+
         # =================================================
         # MODEL
         # =================================================
 
-        self.model = AppearanceClassifier(
+        print()
+        print("Loading TemporalClassifier...")
+
+        self.model = TemporalClassifier(
             num_classes=num_classes,
             freeze_backbone=True,
-            uncertainty_threshold=uncertainty_threshold,
+            gradient_checkpointing=(
+                gradient_checkpointing
+            ),
         ).to(self.device)
 
-        # =================================================
-        # PARTIAL AIMv2 FINE-TUNING
-        # =================================================
-
         self.model.unfreeze_backbone(
-            last_n_blocks=finetune_last_n_blocks,
+            last_n_blocks=finetune_last_n_blocks
         )
 
-        # =================================================
-        # PARAMETER SUMMARY
-        # =================================================
-
         self._print_parameter_summary()
+
 
         # =================================================
         # OPTIMIZER
@@ -588,6 +559,10 @@ class AppearanceTrainer:
 
         backbone_parameters = []
         head_parameters = []
+
+        BACKBONE_PREFIX = (
+            "backbone.backbone.backbone."
+        )
 
         for name, parameter in (
             self.model.named_parameters()
@@ -597,58 +572,58 @@ class AppearanceTrainer:
                 continue
 
             if name.startswith(
-                "backbone.backbone.backbone."
+                BACKBONE_PREFIX
             ):
-
                 backbone_parameters.append(
                     parameter
                 )
-
             else:
-
                 head_parameters.append(
                     parameter
                 )
 
         if not backbone_parameters:
-
             raise RuntimeError(
-                "No trainable AIMv2 backbone parameters "
-                "were found."
+                "No trainable VideoMAE backbone "
+                "parameters were found."
             )
 
         if not head_parameters:
-
             raise RuntimeError(
-                "No trainable task-specific parameters "
-                "were found."
+                "No trainable task-specific "
+                "head parameters were found."
             )
+
 
         self.optimizer = torch.optim.AdamW(
             [
                 {
                     "params": backbone_parameters,
-                    "lr": backbone_lr,
+                    "lr": backbone_lr
                 },
                 {
                     "params": head_parameters,
-                    "lr": head_lr,
+                    "lr": head_lr
                 },
             ],
             weight_decay=weight_decay,
         )
 
-        print()
 
-        print(
-            f"Optimizer AIMv2 params : "
-            f"{sum(p.numel() for p in backbone_parameters):,}"
+        # =================================================
+        # LR SCHEDULER
+        # =================================================
+
+        self.scheduler = (
+            torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer,
+                mode="max",
+                factor=lr_scheduler_factor,
+                patience=lr_scheduler_patience,
+                min_lr=lr_scheduler_min_lr,
+            )
         )
 
-        print(
-            f"Optimizer head params  : "
-            f"{sum(p.numel() for p in head_parameters):,}"
-        )
 
         # =================================================
         # MIXED PRECISION
@@ -656,32 +631,25 @@ class AppearanceTrainer:
 
         self.scaler = GradScaler(
             "cuda",
-            enabled=(self.device == "cuda"),
+            enabled=(
+                self.device == "cuda"
+            )
         )
 
+
     # =====================================================
-    # HELPERS
+    # GET LABELS
     # =====================================================
 
     @staticmethod
     def _get_labels(csv_file):
-        """
-        Read labels from the training CSV.
-
-        Supported labels:
-
-            real -> 0
-            fake -> 1
-            0    -> 0
-            1    -> 1
-        """
 
         df = pd.read_csv(csv_file)
 
         if "label" not in df.columns:
             raise ValueError(
-                f"'label' column not found in {csv_file}. "
-                f"Available columns: {list(df.columns)}"
+                f"'label' column not found "
+                f"in {csv_file}"
             )
 
         labels = (
@@ -689,14 +657,12 @@ class AppearanceTrainer:
             .astype(str)
             .str.strip()
             .str.lower()
-            .map(
-                {
-                    "real": 0,
-                    "fake": 1,
-                    "0": 0,
-                    "1": 1,
-                }
-            )
+            .map({
+                "real": 0,
+                "fake": 1,
+                "0": 0,
+                "1": 1,
+            })
         )
 
         if labels.isna().any():
@@ -705,18 +671,22 @@ class AppearanceTrainer:
                 df.loc[
                     labels.isna(),
                     "label"
-                ]
-                .unique()
+                ].unique()
             )
 
             raise ValueError(
-                f"Unknown labels found in {csv_file}: "
+                f"Unknown labels found: "
                 f"{bad_labels}"
             )
 
         return labels.to_numpy(
             dtype=np.int64
         )
+
+
+    # =====================================================
+    # PARAMETER SUMMARY
+    # =====================================================
 
     def _print_parameter_summary(self):
 
@@ -725,6 +695,10 @@ class AppearanceTrainer:
 
         backbone_trainable = 0
         head_trainable = 0
+
+        BACKBONE_PREFIX = (
+            "backbone.backbone.backbone."
+        )
 
         for name, parameter in (
             self.model.named_parameters()
@@ -737,15 +711,12 @@ class AppearanceTrainer:
                 trainable += parameter.numel()
 
                 if name.startswith(
-                    "backbone.backbone.backbone."
+                    BACKBONE_PREFIX
                 ):
-
                     backbone_trainable += (
                         parameter.numel()
                     )
-
                 else:
-
                     head_trainable += (
                         parameter.numel()
                     )
@@ -770,14 +741,28 @@ class AppearanceTrainer:
         )
 
         print(
-            f"Trainable AIMv2         : "
+            f"Trainable VideoMAE      : "
             f"{backbone_trainable:,}"
         )
 
         print(
-            f"Trainable head/pooling  : "
+            f"Trainable head          : "
             f"{head_trainable:,}"
         )
+
+
+    # =====================================================
+    # CURRENT LEARNING RATES
+    # =====================================================
+
+    def _current_lrs(self):
+
+        return [
+            group["lr"]
+            for group
+            in self.optimizer.param_groups
+        ]
+
 
     # =====================================================
     # GPU TEMPERATURE
@@ -794,7 +779,7 @@ class AppearanceTrainer:
                 [
                     "nvidia-smi",
                     "--query-gpu=temperature.gpu",
-                    "--format=csv,noheader,nounits",
+                    "--format=csv,noheader,nounits"
                 ],
                 capture_output=True,
                 text=True,
@@ -810,19 +795,20 @@ class AppearanceTrainer:
                 .splitlines()
             )
 
-            if not output:
-                return None
-
-            return int(output[0])
+            return (
+                int(output[0])
+                if output
+                else None
+            )
 
         except Exception:
-
             return None
+
 
     def check_gpu_temperature(
         self,
         epoch,
-        step,
+        step
     ):
 
         temperature = (
@@ -836,16 +822,13 @@ class AppearanceTrainer:
 
             print()
             print("=" * 78)
-
             print(
                 f"GPU temperature = "
                 f"{temperature}°C"
             )
-
             print(
                 "Stopping training safely."
             )
-
             print("=" * 78)
 
             self.save_checkpoint(
@@ -856,21 +839,25 @@ class AppearanceTrainer:
                 val_accuracy=None,
                 tag="temperature_stop",
                 stop_reason=(
-                    f"GPU temperature reached "
-                    f"{temperature}°C"
+                    f"GPU temperature "
+                    f"reached {temperature}°C"
                 ),
             )
 
             return True
 
-        if temperature >= 80 and step % 100 == 0:
+        if (
+            temperature >= 80
+            and step % 100 == 0
+        ):
 
             print(
-                f"WARNING: GPU temperature = "
-                f"{temperature}°C"
+                f"WARNING: GPU temperature "
+                f"= {temperature}°C"
             )
 
         return False
+
 
     # =====================================================
     # FORWARD
@@ -878,16 +865,20 @@ class AppearanceTrainer:
 
     def _forward_step(self, clip):
 
+        # CachedClipDataset returns:
+        # [B, T, 3, 224, 224] uint8
+
         clip = clip.to(
             self.device,
-            non_blocking=True,
+            non_blocking=True
         )
 
-        # Cached dataset returns uint8; convert on the GPU.
-        if clip.dtype == torch.uint8:
-            clip = clip.float().div_(255.0)
+        # Convert uint8 [0,255]
+        # to float [0,1].
+        clip = clip.float() / 255.0
 
         return self.model(clip)
+
 
     # =====================================================
     # EDL REPORTING
@@ -896,7 +887,7 @@ class AppearanceTrainer:
     def _edl_report(
         self,
         evidence,
-        labels=None,
+        labels=None
     ):
 
         dirichlet = compute_dirichlet(
@@ -914,7 +905,7 @@ class AppearanceTrainer:
 
         predicted_class = torch.argmax(
             probabilities,
-            dim=1,
+            dim=1
         )
 
         uncertain_mask = (
@@ -922,14 +913,11 @@ class AppearanceTrainer:
             >= self.uncertainty_threshold
         )
 
-        # 0 = Real
-        # 1 = Fake
-        # 2 = Uncertain
-
         reported_class = (
             predicted_class.clone()
         )
 
+        # 2 = Uncertain
         reported_class[
             uncertain_mask
         ] = 2
@@ -942,11 +930,30 @@ class AppearanceTrainer:
             "reported_class": reported_class,
         }
 
+
+    # =====================================================
+    # UNPACK CACHED BATCH
+    # =====================================================
+
+    @staticmethod
+    def _unpack_batch(batch):
+
+        # CachedClipDataset returns:
+        # (clip, label)
+
+        clip, label = batch
+
+        return clip, label
+
+
     # =====================================================
     # TRAIN ONE EPOCH
     # =====================================================
 
-    def train_one_epoch(self, epoch):
+    def train_one_epoch(
+        self,
+        epoch
+    ):
 
         self.model.train()
 
@@ -969,15 +976,16 @@ class AppearanceTrainer:
 
             current_step = step + 1
 
+
             # ---------------------------------------------
-            # GPU TEMPERATURE CHECK
+            # GPU TEMPERATURE
             # ---------------------------------------------
 
             if current_step % 100 == 0:
 
                 if self.check_gpu_temperature(
                     epoch,
-                    current_step,
+                    current_step
                 ):
 
                     average_loss = (
@@ -994,21 +1002,23 @@ class AppearanceTrainer:
                     return (
                         average_loss,
                         accuracy,
-                        True,
+                        True
                     )
 
-            # DeepfakeDataset returns:
-            #
-            #     (clip, label)
-            #
-            # NOT a dictionary.
 
-            clip, label = batch
+            # ---------------------------------------------
+            # GET BATCH
+            # ---------------------------------------------
+
+            clip, label = (
+                self._unpack_batch(batch)
+            )
 
             label = label.to(
                 self.device,
-                non_blocking=True,
+                non_blocking=True
             )
+
 
             # ---------------------------------------------
             # FORWARD + LOSS
@@ -1018,7 +1028,7 @@ class AppearanceTrainer:
                 device_type="cuda",
                 enabled=(
                     self.device == "cuda"
-                ),
+                )
             ):
 
                 outputs = (
@@ -1030,12 +1040,6 @@ class AppearanceTrainer:
                 evidence = (
                     outputs["evidence"]
                 )
-
-                # IMPORTANT:
-                # No class_weights here.
-                #
-                # WeightedRandomSampler already
-                # balances the training distribution.
 
                 loss = compute_edl_loss(
                     evidence=evidence,
@@ -1054,25 +1058,25 @@ class AppearanceTrainer:
                     / self.accumulation_steps
                 )
 
+
             # ---------------------------------------------
-            # BACKWARD
+            # BACKPROPAGATION
             # ---------------------------------------------
 
             self.scaler.scale(
                 loss_for_backward
             ).backward()
 
+
             # ---------------------------------------------
-            # OPTIMIZER STEP
+            # UPDATE WEIGHTS
             # ---------------------------------------------
 
             should_step = (
                 current_step
                 % self.accumulation_steps
                 == 0
-                or
-                current_step
-                == num_steps
+                or current_step == num_steps
             )
 
             if should_step:
@@ -1096,49 +1100,57 @@ class AppearanceTrainer:
                     set_to_none=True
                 )
 
+
             # ---------------------------------------------
-            # METRICS
+            # LOSS
             # ---------------------------------------------
 
-            running_loss += (
-                loss.item()
-            )
+            running_loss += loss.item()
+
+
+            # ---------------------------------------------
+            # TRAINING ACCURACY
+            # ---------------------------------------------
 
             with torch.no_grad():
 
-                report = self._edl_report(
-                    evidence,
-                    label,
+                report = (
+                    self._edl_report(
+                        evidence,
+                        label
+                    )
                 )
 
                 prediction = (
-                    report[
-                        "predicted_class"
-                    ]
+                    report["predicted_class"]
                 )
 
                 correct += (
                     prediction == label
                 ).sum().item()
 
-                total += label.size(0)
+                total += (
+                    label.size(0)
+                )
+
 
             # ---------------------------------------------
-            # PROGRESS
+            # PRINT PROGRESS
             # ---------------------------------------------
 
             if (
                 current_step % 20 == 0
-                or
-                current_step == num_steps
+                or current_step == num_steps
             ):
 
                 print(
-                    f"Step {current_step:,}/"
+                    f"Step "
+                    f"{current_step:,}/"
                     f"{num_steps:,}   "
                     f"Loss: "
                     f"{running_loss / current_step:.4f}"
                 )
+
 
         average_loss = (
             running_loss / num_steps
@@ -1155,8 +1167,9 @@ class AppearanceTrainer:
         return (
             average_loss,
             accuracy,
-            False,
+            False
         )
+
 
     # =====================================================
     # VALIDATION
@@ -1177,24 +1190,24 @@ class AppearanceTrainer:
         total_fake = 0
         total_uncertain = 0
 
+
         for batch in self.val_loader:
 
-            # DeepfakeDataset returns:
-            #
-            #     (clip, label)
-
-            clip, label = batch
+            clip, label = (
+                self._unpack_batch(batch)
+            )
 
             label = label.to(
                 self.device,
-                non_blocking=True,
+                non_blocking=True
             )
+
 
             with autocast(
                 device_type="cuda",
                 enabled=(
                     self.device == "cuda"
-                ),
+                )
             ):
 
                 outputs = (
@@ -1219,13 +1232,15 @@ class AppearanceTrainer:
                     device=self.device,
                 )
 
-            running_loss += (
-                loss.item()
-            )
 
-            report = self._edl_report(
-                evidence,
-                label,
+            running_loss += loss.item()
+
+
+            report = (
+                self._edl_report(
+                    evidence,
+                    label
+                )
             )
 
             prediction = (
@@ -1240,26 +1255,25 @@ class AppearanceTrainer:
                 report["reported_class"]
             )
 
+
             all_labels.extend(
-                label.detach()
-                .cpu()
+                label.cpu()
                 .numpy()
                 .tolist()
             )
 
             all_predictions.extend(
-                prediction.detach()
-                .cpu()
+                prediction.cpu()
                 .numpy()
                 .tolist()
             )
 
             all_uncertainties.extend(
-                uncertainty.detach()
-                .cpu()
+                uncertainty.cpu()
                 .numpy()
                 .tolist()
             )
+
 
             total_real += int(
                 (reported_class == 0)
@@ -1279,9 +1293,6 @@ class AppearanceTrainer:
                 .item()
             )
 
-        # =================================================
-        # VALIDATION RESULTS
-        # =================================================
 
         if not all_labels:
 
@@ -1290,24 +1301,26 @@ class AppearanceTrainer:
                 "no samples."
             )
 
+
         labels_np = np.asarray(
             all_labels,
-            dtype=np.int64,
+            dtype=np.int64
         )
 
         predictions_np = np.asarray(
             all_predictions,
-            dtype=np.int64,
+            dtype=np.int64
         )
 
         uncertainties_np = np.asarray(
             all_uncertainties,
-            dtype=np.float64,
+            dtype=np.float64
         )
 
-        # =================================================
-        # ACCURACY
-        # =================================================
+
+        # ---------------------------------------------
+        # METRICS
+        # ---------------------------------------------
 
         accuracy = float(
             (
@@ -1316,42 +1329,44 @@ class AppearanceTrainer:
             ).mean()
         )
 
-        # =================================================
-        # BALANCED ACCURACY
-        # =================================================
-
         balanced_accuracy = float(
             balanced_accuracy_score(
                 labels_np,
-                predictions_np,
+                predictions_np
             )
         )
 
-        # =================================================
+
+        # ---------------------------------------------
         # CONFUSION MATRIX
-        #
-        # rows    = actual
-        # columns = predicted
-        #
-        #       Real Fake
-        # Real
-        # Fake
-        # =================================================
+        # ---------------------------------------------
 
         cm = confusion_matrix(
             labels_np,
             predictions_np,
-            labels=[0, 1],
+            labels=[0, 1]
         )
 
-        true_real = int(cm[0, 0])
-        false_fake = int(cm[0, 1])
-        false_real = int(cm[1, 0])
-        true_fake = int(cm[1, 1])
+        true_real = int(
+            cm[0, 0]
+        )
 
-        # =================================================
+        false_fake = int(
+            cm[0, 1]
+        )
+
+        false_real = int(
+            cm[1, 0]
+        )
+
+        true_fake = int(
+            cm[1, 1]
+        )
+
+
+        # ---------------------------------------------
         # REAL RECALL
-        # =================================================
+        # ---------------------------------------------
 
         real_mask = (
             labels_np == 0
@@ -1369,9 +1384,10 @@ class AppearanceTrainer:
             else 0.0
         )
 
-        # =================================================
+
+        # ---------------------------------------------
         # FAKE RECALL
-        # =================================================
+        # ---------------------------------------------
 
         fake_mask = (
             labels_np == 1
@@ -1389,9 +1405,10 @@ class AppearanceTrainer:
             else 0.0
         )
 
-        # =================================================
-        # LOSS
-        # =================================================
+
+        # ---------------------------------------------
+        # OTHER METRICS
+        # ---------------------------------------------
 
         average_loss = (
             running_loss
@@ -1399,10 +1416,6 @@ class AppearanceTrainer:
             if len(self.val_loader) > 0
             else 0.0
         )
-
-        # =================================================
-        # EDL UNCERTAINTY
-        # =================================================
 
         average_uncertainty = float(
             uncertainties_np.mean()
@@ -1415,43 +1428,55 @@ class AppearanceTrainer:
             ).mean()
         )
 
+
         return {
-            "loss": average_loss,
 
-            "accuracy": accuracy,
+            "loss":
+                average_loss,
 
-            "balanced_accuracy": (
-                balanced_accuracy
-            ),
+            "accuracy":
+                accuracy,
 
-            "real_recall": real_recall,
+            "balanced_accuracy":
+                balanced_accuracy,
 
-            "fake_recall": fake_recall,
+            "real_recall":
+                real_recall,
 
-            "average_uncertainty": (
-                average_uncertainty
-            ),
+            "fake_recall":
+                fake_recall,
 
-            "uncertain_rate": uncertain_rate,
+            "average_uncertainty":
+                average_uncertainty,
 
-            "real_count": total_real,
+            "uncertain_rate":
+                uncertain_rate,
 
-            "fake_count": total_fake,
+            "real_count":
+                total_real,
 
-            "uncertain_count": (
-                total_uncertain
-            ),
+            "fake_count":
+                total_fake,
 
-            "true_real": true_real,
+            "uncertain_count":
+                total_uncertain,
 
-            "false_fake": false_fake,
+            "true_real":
+                true_real,
 
-            "false_real": false_real,
+            "false_fake":
+                false_fake,
 
-            "true_fake": true_fake,
+            "false_real":
+                false_real,
 
-            "total": len(labels_np),
+            "true_fake":
+                true_fake,
+
+            "total":
+                len(labels_np),
         }
+
 
     # =====================================================
     # MAIN TRAINING LOOP
@@ -1463,24 +1488,31 @@ class AppearanceTrainer:
         print("=" * 78)
         print(
             "STARTING FULL-DATASET "
-            "APPEARANCE TRAINING"
+            "TEMPORAL TRAINING"
         )
         print("=" * 78)
 
+
         for epoch in range(
             start_epoch,
-            self.num_epochs + 1,
+            self.num_epochs + 1
         ):
 
             start_time = time.time()
 
+
+            # ---------------------------------------------
+            # TRAIN
+            # ---------------------------------------------
+
             (
                 train_loss,
                 train_acc,
-                stopped,
+                stopped
             ) = self.train_one_epoch(
                 epoch
             )
+
 
             if stopped:
 
@@ -1492,9 +1524,10 @@ class AppearanceTrainer:
 
                 return
 
-            # =================================================
-            # VALIDATION
-            # =================================================
+
+            # ---------------------------------------------
+            # VALIDATE
+            # ---------------------------------------------
 
             val = self.validate(
                 epoch
@@ -1505,16 +1538,35 @@ class AppearanceTrainer:
                 - start_time
             )
 
-            # =================================================
-            # EPOCH REPORT
-            # =================================================
+
+            # ---------------------------------------------
+            # LR SCHEDULER
+            # ---------------------------------------------
+
+            lrs_before = (
+                self._current_lrs()
+            )
+
+            self.scheduler.step(
+                val["balanced_accuracy"]
+            )
+
+            lrs_after = (
+                self._current_lrs()
+            )
+
+
+            # ---------------------------------------------
+            # PRINT RESULTS
+            # ---------------------------------------------
 
             print()
             print("=" * 78)
 
             print(
                 f"Epoch "
-                f"{epoch}/{self.num_epochs}"
+                f"{epoch}/"
+                f"{self.num_epochs}"
             )
 
             print("=" * 78)
@@ -1586,7 +1638,8 @@ class AppearanceTrainer:
             print("Confusion Matrix")
 
             print(
-                "                  Pred Real   Pred Fake"
+                "                  "
+                "Pred Real   Pred Fake"
             )
 
             print(
@@ -1608,14 +1661,41 @@ class AppearanceTrainer:
                 f"{elapsed:.1f}s"
             )
 
-            # =================================================
-            # BEST CHECKPOINT
-            # =================================================
+
+            if lrs_after != lrs_before:
+
+                print()
+
+                print(
+                    f"LR reduced: "
+                    f"backbone "
+                    f"{lrs_before[0]:.2e} -> "
+                    f"{lrs_after[0]:.2e}, "
+                    f"head "
+                    f"{lrs_before[1]:.2e} -> "
+                    f"{lrs_after[1]:.2e}"
+                )
+
+            else:
+
+                print(
+                    f"Current LR: "
+                    f"backbone "
+                    f"{lrs_after[0]:.2e}, "
+                    f"head "
+                    f"{lrs_after[1]:.2e}"
+                )
+
+
+            # ---------------------------------------------
+            # CHECK IMPROVEMENT
+            # ---------------------------------------------
 
             improved = (
                 val["balanced_accuracy"]
                 > self.best_balanced_accuracy
             )
+
 
             if improved:
 
@@ -1627,12 +1707,11 @@ class AppearanceTrainer:
 
                 self.epochs_without_improvement = 0
 
+
                 self.save_checkpoint(
                     epoch=epoch,
                     balanced_accuracy=(
-                        val[
-                            "balanced_accuracy"
-                        ]
+                        val["balanced_accuracy"]
                     ),
                     val_accuracy=(
                         val["accuracy"]
@@ -1645,6 +1724,7 @@ class AppearanceTrainer:
                     "New best balanced accuracy."
                 )
 
+
             else:
 
                 self.epochs_without_improvement += 1
@@ -1656,16 +1736,15 @@ class AppearanceTrainer:
                     f"{self.early_stopping_patience}"
                 )
 
-            # =================================================
-            # ALWAYS SAVE LAST
-            # =================================================
+
+            # ---------------------------------------------
+            # SAVE LAST CHECKPOINT
+            # ---------------------------------------------
 
             self.save_checkpoint(
                 epoch=epoch,
                 balanced_accuracy=(
-                    val[
-                        "balanced_accuracy"
-                    ]
+                    val["balanced_accuracy"]
                 ),
                 val_accuracy=(
                     val["accuracy"]
@@ -1674,9 +1753,10 @@ class AppearanceTrainer:
                 stop_reason=None,
             )
 
-            # =================================================
+
+            # ---------------------------------------------
             # EARLY STOPPING
-            # =================================================
+            # ---------------------------------------------
 
             if (
                 self.epochs_without_improvement
@@ -1691,7 +1771,7 @@ class AppearanceTrainer:
                 print(
                     "Validation balanced "
                     "accuracy did not improve "
-                    f"for "
+                    "for "
                     f"{self.early_stopping_patience} "
                     "consecutive epochs."
                 )
@@ -1706,19 +1786,15 @@ class AppearanceTrainer:
                     f"{self.best_epoch}"
                 )
 
-                best_path = os.path.join(
-                    self.checkpoint_dir,
-                    "best.pt",
-                )
-
                 print(
-                    f"Best checkpoint        : "
-                    f"{best_path}"
+                    "Best checkpoint        : "
+                    f"{self.checkpoint_dir}/best.pt"
                 )
 
                 print("=" * 78)
 
                 return
+
 
         # =================================================
         # FINISHED
@@ -1726,11 +1802,9 @@ class AppearanceTrainer:
 
         print()
         print("=" * 78)
-
         print(
             "FULL-DATASET TRAINING FINISHED"
         )
-
         print("=" * 78)
 
         print(
@@ -1743,20 +1817,16 @@ class AppearanceTrainer:
             f"{self.best_epoch}"
         )
 
-        best_path = os.path.join(
-            self.checkpoint_dir,
-            "best.pt",
-        )
-
         print(
             f"Best checkpoint        : "
-            f"{best_path}"
+            f"{self.checkpoint_dir}/best.pt"
         )
 
         print("=" * 78)
 
+
     # =====================================================
-    # CHECKPOINT
+    # SAVE CHECKPOINT
     # =====================================================
 
     def save_checkpoint(
@@ -1770,7 +1840,8 @@ class AppearanceTrainer:
 
         checkpoint = {
 
-            "epoch": epoch,
+            "epoch":
+                epoch,
 
             "model_state":
                 self.model.state_dict(),
@@ -1780,6 +1851,9 @@ class AppearanceTrainer:
 
             "scaler_state":
                 self.scaler.state_dict(),
+
+            "scheduler_state":
+                self.scheduler.state_dict(),
 
             "best_balanced_accuracy":
                 self.best_balanced_accuracy,
@@ -1827,19 +1901,21 @@ class AppearanceTrainer:
                 stop_reason,
         }
 
+
         path = os.path.join(
             self.checkpoint_dir,
-            f"{tag}.pt",
+            f"{tag}.pt"
         )
 
         torch.save(
             checkpoint,
-            path,
+            path
         )
 
         print(
             f"Checkpoint saved -> {path}"
         )
+
 
     # =====================================================
     # RESUME TRAINING
@@ -1847,7 +1923,7 @@ class AppearanceTrainer:
 
     def load_checkpoint(
         self,
-        checkpoint_path,
+        checkpoint_path
     ):
 
         checkpoint = torch.load(
@@ -1855,6 +1931,7 @@ class AppearanceTrainer:
             map_location=self.device,
             weights_only=False,
         )
+
 
         self.model.load_state_dict(
             checkpoint["model_state"]
@@ -1864,8 +1941,11 @@ class AppearanceTrainer:
             checkpoint["optimizer_state"]
         )
 
-        scaler_state = checkpoint.get(
-            "scaler_state"
+
+        scaler_state = (
+            checkpoint.get(
+                "scaler_state"
+            )
         )
 
         if scaler_state:
@@ -1873,10 +1953,23 @@ class AppearanceTrainer:
                 scaler_state
             )
 
+
+        scheduler_state = (
+            checkpoint.get(
+                "scheduler_state"
+            )
+        )
+
+        if scheduler_state:
+            self.scheduler.load_state_dict(
+                scheduler_state
+            )
+
+
         self.best_balanced_accuracy = (
             checkpoint.get(
                 "best_balanced_accuracy",
-                -1.0,
+                -1.0
             )
         )
 
@@ -1885,23 +1978,27 @@ class AppearanceTrainer:
                 "best_epoch",
                 checkpoint.get(
                     "epoch",
-                    0,
-                ),
+                    0
+                )
             )
         )
 
         self.epochs_without_improvement = 0
 
-        loaded_epoch = checkpoint.get(
-            "epoch",
-            0,
+        loaded_epoch = (
+            checkpoint.get(
+                "epoch",
+                0
+            )
         )
+
 
         print()
         print("=" * 78)
 
         print(
-            f"Loaded checkpoint from epoch "
+            f"Loaded checkpoint "
+            f"from epoch "
             f"{loaded_epoch}"
         )
 
@@ -1912,77 +2009,172 @@ class AppearanceTrainer:
 
         print("=" * 78)
 
+
         return loaded_epoch
 
 
 # =========================================================
-# ENTRY POINT
+# MAIN
 # =========================================================
 
 def main():
 
-    trainer = AppearanceTrainer(
+    checkpoint_dir = (
+        "checkpoints/temporal_full"
+    )
 
-        train_csv="data/split/train.csv",
+    resume_path = os.path.join(
+        checkpoint_dir,
+        "last.pt"
+    )
 
-        val_csv="data/split/val.csv",
+    resume = os.path.exists(
+        resume_path
+    )
 
-        dataset_root="data/raw",
 
-        checkpoint_dir=(
-            "checkpoints/appearance_full"
-        ),
+    trainer = TemporalTrainer(
 
-        # RTX 4090
+        train_csv=
+            "data/split/train.csv",
+
+        val_csv=
+            "data/split/val.csv",
+
+        checkpoint_dir=
+            checkpoint_dir,
+
+
+        # =================================================
+        # IMPORTANT:
+        # Batch size = 16
+        # No gradient accumulation
+        # =================================================
+
         batch_size=16,
 
-        # Effective batch size:
-        # 16 × 1 = 16
         accumulation_steps=1,
 
-        # Pretrained AIMv2:
-        # smaller learning rate
+
+        # =================================================
+        # LEARNING RATES
+        # =================================================
+
         backbone_lr=1e-5,
 
-        # New/task-specific layers:
-        # larger learning rate
         head_lr=5e-5,
 
         weight_decay=1e-4,
 
+
+        # =================================================
+        # TRAINING
+        # =================================================
+
         num_epochs=20,
 
-        # 0 = Real
-        # 1 = Fake
         num_classes=2,
 
-        # EDL KL annealing
-        annealing_step=4,
+        annealing_step=10,
 
-        # Fine-tune final 4 AIMv2 blocks
+
+        # =================================================
+        # VIDEO MAE
+        # =================================================
+
         finetune_last_n_blocks=4,
 
-        # RTX 4090 / current environment
+        gradient_checkpointing=True,
+
+
+        # =================================================
+        # DATA LOADING
+        # =================================================
+
         num_workers=8,
 
-        early_stopping_patience=6,
 
-        # Reporting only.
-        # NOT a third learned class.
+        # =================================================
+        # EARLY STOPPING
+        # =================================================
+
+        early_stopping_patience=3,
+
+
+        # =================================================
+        # EDL
+        # =================================================
+
         uncertainty_threshold=0.50,
 
-        # Stability during fine-tuning.
+
+        # =================================================
+        # STABILITY
+        # =================================================
+
         gradient_clip_norm=1.0,
 
-        train_cache="data/cache/train",
-        val_cache="data/cache/val",
-        samples_per_epoch=None,
-        val_subset=None,
+
+        # =================================================
+        # LR SCHEDULER
+        # =================================================
+
+        lr_scheduler_factor=0.5,
+
+        lr_scheduler_patience=1,
+
+        lr_scheduler_min_lr=1e-7,
+
+
+        # =================================================
+        # CACHE
+        # =================================================
+
+        train_cache=
+            "data/cache/train",
+
+        val_cache=
+            "data/cache/val",
     )
 
-    trainer.fit()
 
+    # =====================================================
+    # RESUME IF CHECKPOINT EXISTS
+    # =====================================================
+
+    start_epoch = 1
+
+    if resume:
+
+        print()
+        print(
+            f"Found existing checkpoint: "
+            f"{resume_path}"
+        )
+
+        print(
+            "Resuming training..."
+        )
+
+        start_epoch = (
+            trainer.load_checkpoint(
+                resume_path
+            ) + 1
+        )
+
+
+    # =====================================================
+    # START TRAINING
+    # =====================================================
+
+    trainer.fit(
+        start_epoch=start_epoch
+    )
+
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
     main()
-
