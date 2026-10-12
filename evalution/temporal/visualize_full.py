@@ -56,7 +56,7 @@ TEST_CSV = (
 RESULT_DIR = (
     PROJECT_ROOT
     / "runs"
-    / "temporal_full"
+    / "temporal_full_ft2"
 )
 
 RESULTS_JSON = (
